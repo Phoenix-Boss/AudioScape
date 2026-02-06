@@ -8,7 +8,7 @@ import React, { useMemo } from "react";
 import { Colors } from "@/constants/Colors";
 import { triggerHaptic } from "@/helpers/haptics";
 import { FlashList } from "@shopify/flash-list";
-import FastImage from "@d11/react-native-fast-image";
+import { Image } from "@d11/react-native-fast-image";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { Text, TouchableOpacity, View } from "react-native";

@@ -7,7 +7,7 @@
 import { Colors } from "@/constants/Colors";
 import { triggerHaptic } from "@/helpers/haptics";
 import { FlashList } from "@shopify/flash-list";
-import FastImage from "@d11/react-native-fast-image";
+import { Image } from "@d11/react-native-fast-image";
 import Entypo from "@expo/vector-icons/Entypo";
 import { useRouter } from "expo-router";
 import React, { useMemo, useCallback } from "react";

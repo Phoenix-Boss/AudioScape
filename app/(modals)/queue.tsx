@@ -8,7 +8,7 @@ import VerticalDismiss from "@/components/navigation/VerticalArrowDismiss";
 import { Colors } from "@/constants/Colors";
 import { unknownTrackImageUri } from "@/constants/images";
 import { triggerHaptic } from "@/helpers/haptics";
-import FastImage from "@d11/react-native-fast-image";
+import { Image } from "@d11/react-native-fast-image";
 import { Entypo } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
 import { useRouter } from "expo-router";

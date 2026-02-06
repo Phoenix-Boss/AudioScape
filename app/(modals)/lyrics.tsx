@@ -37,7 +37,7 @@ import {
   scale,
   verticalScale,
 } from "react-native-size-matters/extend";
-import FastImage from "@d11/react-native-fast-image";
+import { Image } from "@d11/react-native-fast-image";
 import { unknownTrackImageUri } from "@/constants/images";
 
 const THRESHOLD = 150; // Threshold for lyric line activation in milliseconds.

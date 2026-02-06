@@ -1,67 +1,96 @@
-/**
- * This file defines the layout for the main tab navigation of the application.
- * It configures the appearance of the tab bar, including icons, labels, and background,
- * and specifies the screens accessible through each tab.
- */
-
-import React from "react";
-import { View, StyleSheet } from "react-native";
-import { Tabs } from "expo-router";
+import React, { useRef, useEffect } from "react";
+import { View, StyleSheet, TouchableOpacity, Text } from "react-native";
+import { Tabs, useRouter, useSegments } from "expo-router";
 import { TabBarIcon } from "@/components/navigation/TabBarIcon";
-import { Colors } from "@/constants/Colors";
-import { FloatingPlayer } from "@/components/FloatingPlayer";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { moderateScale } from "react-native-size-matters/extend";
+import FloatingPlayer from "@/components/FloatingPlayer";
+import { Ionicons } from "@expo/vector-icons";
+import { triggerHaptic } from "@/helpers/haptics";
+import { useGlobalUIState } from "@/contexts/GlobalUIStateContext";
+import Animated, {
+  useAnimatedStyle,
+  withTiming,
+  Easing,
+} from "react-native-reanimated";
 
-/**
- * `TabLayoutContent` component.
- * Configures the tab navigation and renders the `FloatingPlayer`.
- */
+const COLORS = {
+  goldPrimary: "#D4AF37",
+  goldShiny: "#FFD700",
+  goldRich: "#BF9B30",
+  goldShimmer: "#E6C16A",
+  goldBronze: "#8C6F0E",
+  goldMuted: "#C9A96A",
+  text: "#FFFFFF",
+  textSecondary: "#B3B3B3",
+  textTertiary: "#808080",
+  background: "#000000",
+  surface: "#121212",
+  surfaceLight: "#1F1F1F",
+  surfaceDark: "#0A0A0A",
+  border: "#333333",
+  white: "#FFFFFF",
+};
+
+const TAB_HEIGHT = 56;
+
 function TabLayoutContent() {
-  const { bottom } = useSafeAreaInsets();
+  const { bottom: safeAreaBottom } = useSafeAreaInsets();
+  const router = useRouter();
+  const segments = useSegments();
+  
+  const {
+    tabsVisible,
+    tabsLocked,
+    isMusicPlaying,
+    resetNavigationState,
+  } = useGlobalUIState();
+
+  const lastSegment = useRef(segments.join("/"));
+
+  useEffect(() => {
+    const currentSegment = segments.join("/");
+    if (currentSegment !== lastSegment.current) {
+      resetNavigationState();
+      lastSegment.current = currentSegment;
+    }
+  }, [segments, resetNavigationState]);
+
+  // Tab animation: slide DOWN to hide, slide UP to show
+  // When visible: translateY = 0 (at bottom edge)
+  // When hidden: translateY = TAB_HEIGHT + safeAreaBottom (off screen below)
+  const tabAnimatedStyle = useAnimatedStyle(() => {
+    const translateY = tabsVisible 
+      ? 0 
+      : TAB_HEIGHT + safeAreaBottom;
+    
+    return {
+      transform: [{ translateY }],
+    };
+  }, [tabsVisible, safeAreaBottom]);
+
+  const handleTabPress = (tabName: string) => {
+    triggerHaptic();
+    router.push(`/${tabName}`);
+  };
+
+  const tabs = [
+    { name: "index", title: "Home", icon: "home", iconOutline: "home-outline" },
+    { name: "search", title: "Search", icon: "search", iconOutline: "search-outline" },
+    { name: "library", title: "Library", icon: "albums", iconOutline: "albums-outline" },
+  ];
 
   return (
-    <View style={{ flex: 1, backgroundColor: Colors.background }}>
+    <View style={{ flex: 1, backgroundColor: COLORS.background }}>
       <Tabs
         screenOptions={{
           tabBarStyle: {
-            borderTopWidth: 0,
-            bottom: 0,
-            left: 0,
-            right: 0,
-            position: "absolute",
-            elevation: 0, // Remove shadow on Android.
+            display: "none",
           },
-          tabBarLabelStyle: {
-            fontSize: moderateScale(10),
-            fontWeight: "900",
-          },
-          tabBarActiveTintColor: Colors.tint,
-          tabBarInactiveTintColor: "#afafaf",
-          headerShown: false, // Hide header for all tab screens.
-          tabBarBackground: () => (
-            <View
-              style={{
-                ...StyleSheet.absoluteFillObject,
-              }}
-            >
-              {/* Gradient overlay for the tab bar background */}
-              <LinearGradient
-                colors={["transparent", "black"]}
-                style={{
-                  position: "absolute",
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  height: 115 + bottom,
-                }}
-              />
-            </View>
-          ),
+          headerShown: false,
         }}
       >
-        {/* Home Tab */}
         <Tabs.Screen
           name="index"
           options={{
@@ -86,7 +115,6 @@ function TabLayoutContent() {
             ),
           }}
         />
-        {/* Library Tab */}
         <Tabs.Screen
           name="library"
           options={{
@@ -99,26 +127,107 @@ function TabLayoutContent() {
             ),
           }}
         />
-        {/* Settings Tab */}
-        <Tabs.Screen name="settings" options={{ href: null }} />
+        <Tabs.Screen
+          name="player"
+          options={{
+            href: null,
+            headerShown: false,
+          }}
+        />
+        <Tabs.Screen 
+          name="settings" 
+          options={{ 
+            href: null 
+          }} 
+        />
       </Tabs>
-      {/* Floating player component, positioned above the tab bar */}
-      <FloatingPlayer
-        style={{
-          position: "absolute",
-          left: 8,
-          right: 8,
-          bottom: bottom + 60,
-        }}
-      />
+
+      {/* CUSTOM TAB BAR - Slides DOWN to hide, UP to show */}
+      <Animated.View 
+        style={[
+          styles.customTabBar,
+          { 
+            height: TAB_HEIGHT + safeAreaBottom,
+            paddingBottom: safeAreaBottom,
+          },
+          tabAnimatedStyle
+        ]}
+      >
+        <LinearGradient
+          colors={[
+            "rgba(18,18,18,0.98)",
+            "rgba(18,18,18,0.95)",
+            COLORS.surfaceDark
+          ]}
+          style={StyleSheet.absoluteFill}
+        />
+        
+        <View style={styles.tabBarGoldBorder} />
+        
+        <View style={styles.tabButtonsContainer}>
+          {tabs.map((tab) => (
+            <TouchableOpacity
+              key={tab.name}
+              style={styles.tabButton}
+              onPress={() => handleTabPress(tab.name)}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name={tab.icon}
+                size={24}
+                color={COLORS.goldShimmer}
+              />
+              <Text style={styles.tabLabel}>{tab.title}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </Animated.View>
+      
+      <FloatingPlayer />
     </View>
   );
 }
 
-/**
- * `TabLayout` component.
- * A wrapper component for `TabLayoutContent`.
- */
 export default function TabLayout() {
   return <TabLayoutContent />;
 }
+
+const styles = StyleSheet.create({
+  customTabBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.goldPrimary + "40",
+    zIndex: 10,
+    overflow: "hidden",
+  },
+  tabBarGoldBorder: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: COLORS.goldPrimary + "60",
+  },
+  tabButtonsContainer: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    alignItems: "center",
+    flex: 1,
+  },
+  tabButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    flex: 1,
+    paddingVertical: 8,
+  },
+  tabLabel: {
+    fontSize: moderateScale(10),
+    fontWeight: "600",
+    color: COLORS.goldShimmer,
+    marginTop: 4,
+    letterSpacing: 0.5,
+  },
+});

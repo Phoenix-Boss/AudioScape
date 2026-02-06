@@ -4,16 +4,24 @@ const withAbiSplit = require("./plugins/withAbiSplit");
 const withIconXml = require("./plugins/withIconXml");
 
 export default {
-  name: IS_DEV ? "AudioScape (Dev)" : "AudioScape",
-  owner: "ankushsarkar",
-  slug: "AudioScape",
+  name: IS_DEV ? "Mavins Player (Dev)" : "Mavins Player",
+  owner: "mavins",
+  slug: "mavins-org",
   version: packageJson.version,
   platforms: ["android"],
   orientation: "portrait",
   icon: "./assets/images/icon.png",
-  scheme: IS_DEV ? "audioscape-dev" : "audioscape",
+  scheme: IS_DEV ? "mavins-player-dev" : "mavins-player",
   userInterfaceStyle: "automatic",
   newArchEnabled: true,
+
+  // 🔐 EAS Project ID — MUST BE HERE FOR DYNAMIC CONFIG
+  extra: {
+    eas: {
+      projectId: "04a2d910-9f44-4333-85a9-e7720e80c0d9"
+    }
+  },
+
   android: {
     softwareKeyboardLayoutMode: "pan",
     permissions: [
@@ -24,8 +32,8 @@ export default {
     ],
     icon: "./assets/images/icon.png",
     package: IS_DEV
-      ? "com.ankushsarkar.audioscape.dev"
-      : "com.ankushsarkar.audioscape",
+      ? "com.mavins.player.dev"
+      : "com.mavins.player",
     adaptiveIcon: {
       foregroundImage: "./assets/images/adaptive-icon-foreground.png",
       backgroundImage: "./assets/images/adaptive-icon-background.png",
@@ -35,6 +43,7 @@ export default {
     edgeToEdgeEnabled: true,
     versionCode: 1,
   },
+
   plugins: [
     withAbiSplit,
     withIconXml,
@@ -58,15 +67,8 @@ export default {
       },
     ],
   ],
+
   experiments: {
     typedRoutes: true,
-  },
-  extra: {
-    router: {
-      origin: false,
-    },
-    eas: {
-      projectId: "5b2ff856-818a-42fc-b589-5287fa676098",
-    },
   },
 };

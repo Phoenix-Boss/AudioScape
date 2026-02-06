@@ -13,7 +13,7 @@ import {
   processItems,
   processSearchPageData,
 } from "@/services/youtube";
-import FastImage from "@d11/react-native-fast-image";
+import { Image } from "@d11/react-native-fast-image";
 import { Entypo, EvilIcons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";

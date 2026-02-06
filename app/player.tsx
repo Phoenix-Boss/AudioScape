@@ -1,10 +1,9 @@
 /**
- * This file defines the main music player screen of the application.
- * It displays the currently active track's artwork, title, artist, playback controls,
- * and progress. It also integrates features like favoriting, downloading, and navigating
- * to the queue and lyrics screens.
+ * This file defines the main full-screen music player of the application.
+ * Displays the currently active track with artwork, title, artist, controls,
+ * progress, favorite/download/share, and navigation to queue/lyrics.
+ * Follows premium behavior: no mini-player here (global one lives in tabs layout).
  */
-
 import { MovingText } from "@/components/MovingText";
 import VerticalSwipeGesture from "@/components/navigation/VerticalGesture";
 import {
@@ -19,7 +18,7 @@ import { triggerHaptic } from "@/helpers/haptics";
 import { useImageColors } from "@/hooks/useImageColors";
 import { useTrackPlayerFavorite } from "@/hooks/useTrackPlayerFavorite";
 import { defaultStyles } from "@/styles";
-import FastImage from "@d11/react-native-fast-image";
+import { Image } from "expo-image"; // ← Changed to expo-image
 import {
   MaterialIcons,
   Feather,
@@ -45,50 +44,46 @@ import { useActiveTrack } from "react-native-track-player";
 import { unknownTrackImageUri } from "@/constants/images";
 
 /**
- * `PlayerScreen` component.
- * Displays the full-screen music player UI.
+ * `PlayerScreen` – Full-screen music player UI
  */
 const PlayerScreen = () => {
   const activeTrack = useActiveTrack();
   const router = useRouter();
 
-  // Extract dominant colors from the active track's artwork for the background gradient.
+  // Extract dominant colors from artwork for gradient background
   const { imageColors } = useImageColors(
-    activeTrack?.artwork ?? unknownTrackImageUri,
+    activeTrack?.artwork ?? unknownTrackImageUri
   );
 
-  // Get safe area insets to adjust UI elements for notches and system bars.
   const { top, bottom } = useSafeAreaInsets();
 
-  // Hook to manage track favoriting.
   const { isFavorite, toggleFavoriteFunc } = useTrackPlayerFavorite();
 
-  // Function to handle sharing the current track.
   const onShare = async () => {
     triggerHaptic();
     try {
       await Share.share({
-        message: "https://music.youtube.com/watch?v=" + activeTrack?.id,
+        message: `https://music.youtube.com/watch?v=${activeTrack?.id}`,
         title: "Check out this song!",
       });
     } catch (error: any) {
-      console.error(error.message);
+      console.error("Share failed:", error.message);
     }
   };
 
-  // Show a loading indicator if no active track is available.
+  // Loading state when no track is active
   if (!activeTrack) {
     return (
       <View style={[defaultStyles.container, { justifyContent: "center" }]}>
-        <ActivityIndicator color={Colors.icon} />
+        <ActivityIndicator color={Colors.icon} size="large" />
       </View>
     );
   }
 
   return (
-    // Enable vertical swipe gesture to dismiss the player.
+    // Swipe down to dismiss (uses your VerticalSwipeGesture)
     <VerticalSwipeGesture>
-      {/* Background gradient based on album artwork colors */}
+      {/* Dynamic gradient background based on artwork */}
       <LinearGradient
         style={{ flex: 1 }}
         colors={
@@ -98,131 +93,128 @@ const PlayerScreen = () => {
         }
       >
         <View style={styles.overlayContainer}>
-          {/* Dismiss player indicator */}
+          {/* Subtle dismiss indicator at top */}
           <DismissPlayerSymbol />
 
-          <View style={{ flex: 1, marginTop: top + verticalScale(50) }}>
-            {/* Album artwork */}
+          <View style={{ flex: 1, marginTop: top + verticalScale(60) }}>
+            {/* Large centered artwork – now using expo-image */}
             <View style={styles.artworkImageContainer}>
-              <FastImage
-                source={{
-                  uri: activeTrack.artwork,
-                  priority: FastImage.priority.high,
-                }}
-                resizeMode="cover"
+              <Image
+                source={activeTrack.artwork ?? unknownTrackImageUri}
                 style={styles.artworkImage}
+                contentFit="cover"           // equivalent to resizeMode="cover"
+                transition={300}             // smooth fade-in transition
+                placeholder={require("@/assets/images/mavins.png")} // optional: add a local blur placeholder
+                cachePolicy="memory-disk"    // aggressive caching
               />
             </View>
 
-            <View style={{ flex: 1 }}>
-              <View style={{ marginTop: verticalScale(40) }}>
-                <View style={{ height: verticalScale(50) }}>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    {/* Track title, with marquee effect for long titles */}
-                    <View style={styles.trackTitleContainer}>
-                      <MovingText
-                        text={activeTrack.title ?? ""}
-                        animationThreshold={28}
-                        style={styles.trackTitleText}
-                      />
-                    </View>
+            {/* Track info + controls */}
+            <View style={{ flex: 1, marginTop: verticalScale(48) }}>
+              <View style={{ marginHorizontal: screenPadding.horizontal }}>
+                {/* Title, favorite, download, share row */}
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <View style={styles.trackTitleContainer}>
+                    <MovingText
+                      text={activeTrack.title ?? "Unknown Title"}
+                      animationThreshold={28}
+                      style={styles.trackTitleText}
+                    />
+                  </View>
 
-                    {/* Favorite button */}
-                    <View style={styles.favoriteBotton}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: scale(8) }}>
+                    <View style={styles.favoriteButton}>
                       <HeartButton
                         isFavorite={isFavorite}
                         onToggle={() => {
                           triggerHaptic();
                           toggleFavoriteFunc();
                         }}
-                        size={moderateScale(20)}
+                        size={moderateScale(22)}
                       />
                     </View>
 
-                    <DownloadSongButton style={styles.downloadBotton} />
+                    <DownloadSongButton style={styles.downloadButton} />
 
-                    {/* Share button */}
                     <TouchableOpacity
                       onPress={onShare}
                       style={styles.shareButton}
+                      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                     >
                       <MaterialCommunityIcons
                         name="share-outline"
-                        size={moderateScale(25)}
-                        color={"#000"}
+                        size={moderateScale(26)}
+                        color="#fff"
                       />
                     </TouchableOpacity>
                   </View>
-
-                  {/* Track artist */}
-                  {activeTrack.artist && (
-                    <Text
-                      numberOfLines={1}
-                      style={[
-                        styles.trackArtistText,
-                        { marginTop: verticalScale(6) },
-                      ]}
-                    >
-                      {activeTrack.artist}
-                    </Text>
-                  )}
                 </View>
 
-                {/* Playback progress bar */}
-                <PlayerProgressBar style={{ marginTop: verticalScale(32) }} />
+                {/* Artist name */}
+                {activeTrack.artist && (
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.trackArtistText, { marginTop: verticalScale(8) }]}
+                  >
+                    {activeTrack.artist}
+                  </Text>
+                )}
 
-                {/* Player controls (play/pause, skip, repeat) */}
+                {/* Progress bar */}
+                <PlayerProgressBar style={{ marginTop: verticalScale(40) }} />
+
+                {/* Main playback controls */}
                 <PlayerControls
                   style={{
-                    marginTop: verticalScale(40),
-                    marginBottom: verticalScale(125),
+                    marginTop: verticalScale(48),
+                    marginBottom: verticalScale(100),
                   }}
                 />
               </View>
-            </View>
-            {/* Bottom navigation buttons (Queue, Lyrics) */}
-            <View
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-evenly",
-                bottom: verticalScale(20) + bottom,
-              }}
-            >
-              <TouchableOpacity
-                style={styles.bottomButton}
-                onPress={() => {
-                  triggerHaptic();
-                  router.push({ pathname: "/(modals)/queue" });
-                }}
-              >
-                <MaterialIcons
-                  name="queue-music"
-                  size={moderateScale(20)}
-                  color={Colors.text}
-                />
-                <Text style={styles.bottomButtonText}>Queue</Text>
-              </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.bottomButton}
-                onPress={() => {
-                  triggerHaptic();
-                  router.push({ pathname: "/(modals)/lyrics" });
-                }}
+              {/* Bottom action buttons (Queue / Lyrics) */}
+              <View
+                style={[
+                  styles.bottomActions,
+                  { paddingBottom: bottom + verticalScale(24) },
+                ]}
               >
-                <Feather
-                  name="align-center"
-                  size={moderateScale(20)}
-                  color={Colors.text}
-                />
-                <Text style={styles.bottomButtonText}>Lyrics</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.bottomButton}
+                  onPress={() => {
+                    triggerHaptic();
+                    router.push({ pathname: "/(modals)/queue" });
+                  }}
+                >
+                  <MaterialIcons
+                    name="queue-music"
+                    size={moderateScale(22)}
+                    color={Colors.text}
+                  />
+                  <Text style={styles.bottomButtonText}>Queue</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.bottomButton}
+                  onPress={() => {
+                    triggerHaptic();
+                    router.push({ pathname: "/(modals)/lyrics" });
+                  }}
+                >
+                  <Feather
+                    name="align-center"
+                    size={moderateScale(22)}
+                    color={Colors.text}
+                  />
+                  <Text style={styles.bottomButtonText}>Lyrics</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </View>
@@ -232,10 +224,7 @@ const PlayerScreen = () => {
 };
 
 /**
- * `DismissPlayerSymbol` component.
- * Displays a small horizontal bar at the top of the player screen,
- * indicating that the player can be dismissed by swiping down.
- * @returns The rendered dismiss symbol component.
+ * Dismiss indicator – small elegant bar at top
  */
 const DismissPlayerSymbol = () => {
   const { top } = useSafeAreaInsets();
@@ -244,113 +233,114 @@ const DismissPlayerSymbol = () => {
     <View
       style={{
         position: "absolute",
-        top: top + 8,
+        top: top + 12,
         left: 0,
         right: 0,
-        flexDirection: "row",
-        justifyContent: "center",
+        alignItems: "center",
+        zIndex: 10,
       }}
     >
       <View
-        accessible={false}
         style={{
-          width: scale(45),
-          height: verticalScale(6),
-          borderRadius: 8,
-          backgroundColor: "#fff",
-          opacity: 0.7,
+          width: scale(48),
+          height: verticalScale(5),
+          borderRadius: 999,
+          backgroundColor: "rgba(255,255,255,0.65)",
         }}
       />
     </View>
   );
 };
 
-// Styles for the PlayerScreen component.
+// Styles – refined for premium feel (unchanged)
 const styles = ScaledSheet.create({
   overlayContainer: {
     ...defaultStyles.container,
     paddingHorizontal: screenPadding.horizontal,
-    backgroundColor: "rgba(0,0,0,0.25)",
+    backgroundColor: "rgba(0,0,0,0.35)", // Slightly darker overlay for contrast
   },
   artworkImageContainer: {
-    elevation: 20,
+    elevation: 24,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.8,
-    shadowRadius: 11,
-    borderRadius: 12,
-    width: "310@ms",
-    height: "310@ms",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.7,
+    shadowRadius: 16,
+    borderRadius: "16@ms",
+    width: "320@ms",
+    height: "320@ms",
     alignSelf: "center",
+    overflow: "hidden",
   },
   artworkImage: {
     width: "100%",
     height: "100%",
-    resizeMode: "cover",
-    borderRadius: 12,
+    borderRadius: "16@ms",
   },
   trackTitleContainer: {
     flex: 1,
     overflow: "hidden",
+    marginRight: scale(12),
   },
   trackTitleText: {
     ...defaultStyles.text,
-    fontSize: "22@ms",
+    fontSize: "24@ms",
     fontWeight: "700",
+    letterSpacing: -0.3,
   },
   trackArtistText: {
     ...defaultStyles.text,
-    fontSize: "20@ms",
-    opacity: 0.8,
-    maxWidth: "90%",
+    fontSize: "18@ms",
+    opacity: 0.85,
+    letterSpacing: -0.2,
   },
-  favoriteBotton: {
-    height: "30@ms",
-    width: "30@ms",
-    alignItems: "center",
+  favoriteButton: {
+    width: "36@ms",
+    height: "36@ms",
+    borderRadius: "12@ms",
+    backgroundColor: "rgba(255,255,255,0.15)",
     justifyContent: "center",
-    backgroundColor: "#fff",
-    borderBottomRightRadius: 6,
-    borderTopRightRadius: 6,
-    borderBottomLeftRadius: 10,
-    borderTopLeftRadius: 10,
-    marginLeft: 4,
+    alignItems: "center",
   },
-  downloadBotton: {
-    height: "30@ms",
-    width: "30@ms",
-    alignItems: "center",
+  downloadButton: {
+    width: "36@ms",
+    height: "36@ms",
+    borderRadius: "12@ms",
+    backgroundColor: "rgba(255,255,255,0.15)",
     justifyContent: "center",
-    backgroundColor: "#fff",
-    borderRadius: 6,
-    marginHorizontal: 4,
+    alignItems: "center",
   },
   shareButton: {
-    height: "30@ms",
-    width: "30@ms",
-    alignItems: "center",
+    width: "36@ms",
+    height: "36@ms",
+    borderRadius: "12@ms",
+    backgroundColor: "rgba(255,255,255,0.15)",
     justifyContent: "center",
-    backgroundColor: "#fff",
-    borderBottomRightRadius: 10,
-    borderTopRightRadius: 15,
-    borderBottomLeftRadius: 6,
-    borderTopLeftRadius: 6,
+    alignItems: "center",
   },
-  bottomButtonText: {
-    textAlign: "center",
-    color: Colors.text,
-    flexShrink: 1,
-    fontSize: "16@ms",
-    fontWeight: "500",
-    marginLeft: 5,
+  bottomActions: {
+    flexDirection: "row",
+    justifyContent: "space-evenly",
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: screenPadding.horizontal,
   },
   bottomButton: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: "9@vs",
-    paddingHorizontal: "15@s",
-    borderRadius: 18,
-    alignSelf: "center",
+    paddingVertical: "10@vs",
+    paddingHorizontal: "18@s",
+    borderRadius: "24@ms",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  bottomButtonText: {
+    color: "#fff",
+    fontSize: "15@ms",
+    fontWeight: "600",
+    marginLeft: "8@s",
   },
 });
 

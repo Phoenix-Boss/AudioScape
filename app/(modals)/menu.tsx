@@ -23,7 +23,7 @@ import {
   processPlaylistPageData,
 } from "@/services/youtube";
 import { usePlaylists } from "@/store/library";
-import FastImage from "@d11/react-native-fast-image";
+import { Image } from "@d11/react-native-fast-image";
 import {
   Feather,
   MaterialCommunityIcons,
