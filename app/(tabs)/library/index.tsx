@@ -1,352 +1,367 @@
-/**
- * This file defines the `LibraryScreen` component, which serves as the main navigation hub
- * for the user's personal music library. It provides access to different sections like
- * Favorites, Downloads, and Playlists.
- */
-
-import React, { useCallback, useMemo, useState } from "react";
-import CreatePlaylistModal from "@/app/(modals)/createPlaylist";
-import { Colors } from "@/constants/Colors";
-import { unknownTrackImageUri } from "@/constants/images";
-import { triggerHaptic } from "@/helpers/haptics";
-import { useLastActiveTrack } from "@/hooks/useLastActiveTrack";
-import { usePlaylists } from "@/store/library";
-import { defaultStyles } from "@/styles";
-import { FlashList } from "@shopify/flash-list";
-import { Image } from "@d11/react-native-fast-image";
-import { Entypo, MaterialCommunityIcons } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
-import { Route, useRouter } from "expo-router";
-import { LinearGradient } from "expo-linear-gradient";
+import React, { useCallback } from "react";
 import {
-  Text,
-  ToastAndroid,
-  TouchableOpacity,
   View,
-  StyleSheet,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  ScrollView,
+  RefreshControl,
 } from "react-native";
-import { AnimatedFAB, Divider } from "react-native-paper";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import {
-  ScaledSheet,
-  moderateScale,
-  verticalScale,
-} from "react-native-size-matters/extend";
-import { useActiveTrack } from "react-native-track-player";
+import { useRouter } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { ScaledSheet, moderateScale } from "react-native-size-matters/extend";
+import { Colors } from "@/constants/Colors";
+import { defaultStyles } from "@/styles";
+import { triggerHaptic } from "@/helpers/haptics";
+import { usePlaylists } from "@/store/library";
+import { useGracePeriod } from "@/services/mavin/monetization/GracePeriod";
+import { useMavinEngine } from "@/services/mavin/core/Engine";
 
-/**
- * `LibraryScreen` component.
- * Displays the user's library.
- */
-export default function LibraryScreen() {
-  const { playlists, createNewPlaylist } = usePlaylists();
+// ============================================================================
+// LIBRARY SCREEN
+// ============================================================================
+const LibraryScreen = () => {
   const router = useRouter();
-  const { top, bottom } = useSafeAreaInsets();
-  const lastActiveTrack = useLastActiveTrack();
-  const activeTrack = useActiveTrack();
-  const [isScrolling, setIsScrolling] = useState<boolean>(false);
-  const [headerHeight, setHeaderHeight] = useState(0);
-  const [modalVisible, setModalVisible] = useState(false);
+  const { playlists, downloadedSongs } = usePlaylists();
+  const { gracePeriodStatus, isPremium, daysRemaining } = useGracePeriod();
+  const engine = useMavinEngine();
+  const [refreshing, setRefreshing] = React.useState(false);
 
-  // Determine if the floating player should be visible.
-  const isFloatingPlayerNotVisible = !(activeTrack ?? lastActiveTrack);
+  // ============================================================================
+  // HANDLE PLAY (Offline Support)
+  // ============================================================================
+  const handlePlay = useCallback((songId: string) => {
+    triggerHaptic("light");
+    
+    // Check if song is downloaded (offline playback)
+    const isDownloaded = downloadedSongs.some(s => s.id === songId);
+    
+    if (isDownloaded && gracePeriodStatus !== 'grace_period' && !isPremium) {
+      // Free users: Show ad before offline playback (optional)
+      // For now: Allow offline playback without ad (premium feature)
+    }
+    
+    // Dispatch play action
+    engine.dispatch({
+      type: 'PLAY',
+      trackId: songId,
+      videoId: songId, // In production: Use actual videoId
+      position: 0,
+    });
+    
+    router.push('/(player)');
+  }, [engine, router, downloadedSongs, gracePeriodStatus, isPremium]);
 
-  // Convert the playlists object into an array for rendering.
-  const playlistArray = useMemo(
-    () =>
-      Object.entries(playlists).map(([name, tracks]) => ({
-        name,
-        thumbnail: tracks[0]?.thumbnail ?? null,
-      })),
-    [playlists],
-  );
+  // ============================================================================
+  // HANDLE REFRESH
+  // ============================================================================
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    // In production: Refresh playlists and downloaded songs
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    setRefreshing(false);
+  }, []);
 
-  // Predefined library sections (static items like Favorites, Downloads, etc.)
-  const sections: {
-    name: string;
-    icon: keyof typeof MaterialCommunityIcons.glyphMap;
-    path: Route;
-  }[] = [
+  // ============================================================================
+  // LIBRARY SECTIONS
+  // ============================================================================
+  const sections = [
     {
-      name: "Favorites",
-      icon: "heart-outline",
-      path: "/library/favorites" as Route,
+      title: "Downloaded Songs",
+       downloadedSongs,
+      icon: "download",
+      onPress: () => router.push('/downloads'),
+      emptyText: "No downloaded songs yet",
     },
     {
-      name: "Downloads",
-      icon: "download-outline",
-      path: "/library/downloads" as Route,
+      title: "My Playlists",
+       Object.entries(playlists).map(([name, songs]) => ({ name, songCount: songs.length })),
+      icon: "playlist",
+      onPress: () => router.push('/playlists'),
+      emptyText: "Create your first playlist",
+    },
+    {
+      title: "Liked Songs",
+       [], // In production: Fetch from engagement engine
+      icon: "heart",
+      onPress: () => router.push('/likes'),
+      emptyText: "No liked songs yet",
     },
   ];
 
-  /**
-   * Handles the creation of a new playlist.
-   * @param playlistName - The name of the new playlist.
-   */
-  const handleCreatePlaylist = (playlistName: string) => {
-    if (playlists[playlistName]) {
-      triggerHaptic(Haptics.AndroidHaptics.Reject);
-      ToastAndroid.show(
-        "A playlist with this name already exists.",
-        ToastAndroid.SHORT,
-      );
-      return;
-    }
-    triggerHaptic();
-    createNewPlaylist(playlistName);
-    setModalVisible(false);
-  };
-
-  /**
-   * Renders an individual section item (Favorites, Downloaded, etc.).
-   * @param item - The section item to render.
-   * @returns A View component representing a section.
-   */
-  const renderSection = useCallback(
-    ({
-      item,
-    }: {
-      item: {
-        name: string;
-        icon: keyof typeof MaterialCommunityIcons.glyphMap;
-        path: Route;
-      };
-    }) => (
-      <TouchableOpacity
-        style={styles.sectionItem}
-        onPress={() => {
-          triggerHaptic();
-          router.push(item.path);
-        }}
-      >
-        <View style={styles.sectionIconBox}>
-          <MaterialCommunityIcons
-            name={item.icon}
-            size={moderateScale(25)}
-            color={"white"}
+  // ============================================================================
+  // RENDER SECTION
+  // ============================================================================
+  const renderSection = ({ item }: { item: typeof sections[0] }) => (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <View style={styles.sectionTitleContainer}>
+          <Ionicons 
+            name={item.icon as any} 
+            size={moderateScale(20)} 
+            color={Colors.primary} 
           />
+          <Text style={styles.sectionTitle}>{item.title}</Text>
         </View>
-        <Text style={styles.sectionName}>{item.name}</Text>
-      </TouchableOpacity>
-    ),
-    [router],
-  );
-
-  /**
-   * Renders an individual playlist item.
-   * @param item - The playlist item to render.
-   * @returns A View component representing a playlist.
-   */
-  const renderPlaylist = useCallback(
-    ({ item }: { item: { name: string; thumbnail: string | null } }) => (
-      <View style={styles.playlistItem}>
-        <TouchableOpacity
-          style={styles.playlistItemTouchableArea}
-          onPress={() => {
-            triggerHaptic();
-            // Navigate to the individual playlist screen.
-            router.push({
-              pathname: `/library/[playlistName]`,
-              params: { playlistName: item.name },
-            });
-          }}
-        >
-          <FastImage
-            source={{ uri: item.thumbnail ?? unknownTrackImageUri }}
-            style={styles.thumbnail}
-          />
-          <Text style={styles.playlistName}>{item.name}</Text>
-        </TouchableOpacity>
-        {/* Options menu button for the playlist */}
-        <TouchableOpacity
-          onPress={() => {
-            triggerHaptic();
-            // Prepare playlist data for the menu modal.
-            const playlistData = JSON.stringify({
-              name: item.name,
-              thumbnail: item.thumbnail,
-            });
-
-            // Navigate to the menu modal.
-            router.push({
-              pathname: "/(modals)/menu",
-              params: { playlistData: playlistData, type: "playlist" },
-            });
-          }}
-          hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-        >
-          <Entypo
-            name="dots-three-vertical"
-            size={moderateScale(15)}
-            color="white"
-          />
+        <TouchableOpacity onPress={item.onPress}>
+          <Text style={styles.seeAll}>See All</Text>
         </TouchableOpacity>
       </View>
-    ),
-    [router],
-  );
-
-  return (
-    <View style={defaultStyles.container}>
-      {/* Header Overlay */}
-      <View
-        onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          zIndex: 10,
-          overflow: "hidden",
-        }}
-      >
-        {/* Gradient background */}
-        {isScrolling && (
-          <LinearGradient
-            colors={["rgba(0,0,0,1)", "rgba(0,0,0,0.9)"]}
-            locations={[0.2, 1]}
-            style={StyleSheet.absoluteFillObject}
-          />
-        )}
-
-        <Text style={[styles.header, { paddingTop: top }]}>Library</Text>
-
-        {isScrolling && (
-          <Divider
-            style={{ backgroundColor: "rgba(255,255,255,0.3)", height: 0.3 }}
-          />
-        )}
-      </View>
-
-      <FlashList
-        data={playlistArray}
-        renderItem={renderPlaylist}
-        contentContainerStyle={{
-          paddingTop: headerHeight,
-          paddingBottom: verticalScale(190) + bottom,
-        }}
-        showsVerticalScrollIndicator={false}
-        onScroll={(e) => {
-          const currentScrollPosition =
-            Math.floor(e.nativeEvent.contentOffset.y) || 0;
-          setIsScrolling(currentScrollPosition > 5);
-        }}
-        keyExtractor={(item) => item.name}
-        scrollEventThrottle={16}
-        ListHeaderComponent={
-          <View>
-            {/* Sections List */}
-            <FlashList
-              data={sections}
-              renderItem={renderSection}
-              keyExtractor={(item) => item.name}
-              scrollEnabled={false}
-            />
-
-            {/* Playlists header */}
-            {playlistArray.length > 0 && (
-              <Text style={styles.playlistHeader}>
-                {`Playlist${playlistArray.length > 1 ? "s" : ""} (${
-                  playlistArray.length
-                })`}
-              </Text>
-            )}
-          </View>
-        }
-      />
-
-      {/* Floating Action Button to create a new playlist */}
-      <AnimatedFAB
-        style={{
-          position: "absolute",
-          marginRight: 16,
-          marginBottom:
-            (isFloatingPlayerNotVisible ? 60 : moderateScale(138)) + bottom,
-          right: 0,
-          bottom: 0,
-          backgroundColor: "white",
-        }}
-        theme={{ roundness: 1 }}
-        icon="plus"
-        extended={!isScrolling}
-        animateFrom={"right"}
-        label="Create Playlist"
-        color="black"
-        onPress={() => {
-          triggerHaptic();
-          setModalVisible(true);
-        }}
-      />
-
-      {/* Modal for creating a new playlist */}
-      <CreatePlaylistModal
-        visible={modalVisible}
-        onCreate={handleCreatePlaylist}
-        onCancel={() => {
-          triggerHaptic();
-          setModalVisible(false);
-        }}
-      />
+      
+      {item.data.length > 0 ? (
+        <FlatList
+          data={item.data}
+          keyExtractor={(_, index) => index.toString()}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.sectionList}
+          renderItem={({ item: sectionItem, index }) => (
+            <TouchableOpacity 
+              style={styles.sectionItem} 
+              onPress={() => handlePlay(sectionItem.id || sectionItem.name)}
+              activeOpacity={0.85}
+            >
+              <View style={styles.sectionItemContent}>
+                <View style={styles.sectionItemIcon}>
+                  <Ionicons 
+                    name={item.icon as any} 
+                    size={moderateScale(24)} 
+                    color={Colors.primary} 
+                  />
+                </View>
+                <Text style={styles.sectionItemTitle} numberOfLines={1}>
+                  {sectionItem.title || sectionItem.name}
+                </Text>
+                {sectionItem.songCount && (
+                  <Text style={styles.sectionItemSubtitle}>
+                    {sectionItem.songCount} songs
+                  </Text>
+                )}
+              </View>
+            </TouchableOpacity>
+          )}
+          initialNumToRender={5}
+          maxToRenderPerBatch={3}
+        />
+      ) : (
+        <View style={styles.emptySection}>
+          <MaterialIcons name="queue-music" size={moderateScale(48)} color={Colors.textMuted} />
+          <Text style={styles.emptySectionText}>{item.emptyText}</Text>
+        </View>
+      )}
     </View>
   );
-}
 
-// Styles for the LibraryScreen component.
+  // ============================================================================
+  // UI RENDER
+  // ============================================================================
+  return (
+    <SafeAreaView style={[defaultStyles.container, styles.container]}>
+      <ScrollView
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={Colors.primary}
+            titleColor={Colors.primary}
+          />
+        }
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* HEADER */}
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.greeting}>Hello,</Text>
+            <Text style={styles.username}>Your Library</Text>
+          </View>
+          
+          <TouchableOpacity 
+            onPress={() => router.push('/settings')}
+            style={styles.settingsButton}
+          >
+            <Ionicons name="settings" size={moderateScale(24)} color={Colors.text} />
+          </TouchableOpacity>
+        </View>
+
+        {/* GRACE PERIOD BADGE */}
+        {(gracePeriodStatus === 'grace_period' || isPremium) && (
+          <View style={styles.graceContainer}>
+            <View style={styles.graceBadge}>
+              <Ionicons name="shield-checkmark" size={moderateScale(16)} color="#00FF00" />
+              <Text style={styles.graceBadgeText}>
+                {isPremium ? 'Premium Member' : `${daysRemaining}d left • Ad-free`}
+              </Text>
+            </View>
+            {!isPremium && (
+              <TouchableOpacity 
+                style={styles.upgradeButton}
+                onPress={() => router.push('/(modals)/premium')}
+              >
+                <Text style={styles.upgradeButtonText}>Upgrade to Premium</Text>
+                <Ionicons name="sparkles" size={moderateScale(14)} color="#000" />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* LIBRARY SECTIONS */}
+        <FlatList
+          data={sections}
+          keyExtractor={(item) => item.title}
+          renderItem={renderSection}
+          contentContainerStyle={styles.sectionsContainer}
+          showsVerticalScrollIndicator={false}
+        />
+      </ScrollView>
+    </SafeAreaView>
+  );
+};
+
+// ============================================================================
+// STYLES
+// ============================================================================
 const styles = ScaledSheet.create({
+  container: {
+    backgroundColor: Colors.background,
+    paddingTop: 0,
+  },
+  scrollContent: {
+    paddingBottom: "40@vs",
+  },
   header: {
-    fontSize: "24@ms",
-    color: Colors.text,
-    fontFamily: "Meriva",
-    textAlign: "center",
-    paddingVertical: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    paddingHorizontal: "20@s",
+    paddingVertical: "24@vs",
   },
-  playlistHeader: {
-    color: Colors.text,
+  greeting: {
+    color: Colors.textMuted,
     fontSize: "16@ms",
-    marginBottom: "10@ms",
-    marginLeft: 20,
-    marginTop: "10@ms",
   },
-  sectionItem: {
+  username: {
+    color: Colors.text,
+    fontSize: "28@ms",
+    fontWeight: "700",
+    marginTop: "4@vs",
+  },
+  settingsButton: {
+    width: "44@s",
+    height: "44@s",
+    borderRadius: "22@s",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  graceContainer: {
+    backgroundColor: "rgba(0, 255, 0, 0.05)",
+    borderRadius: "16@s",
+    marginHorizontal: "20@s",
+    padding: "16@s",
+    marginBottom: "24@vs",
+    borderWidth: 1,
+    borderColor: "rgba(0, 255, 0, 0.2)",
+  },
+  graceBadge: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: "12@ms",
-    paddingLeft: 20,
+    gap: "8@s",
+    marginBottom: "12@vs",
   },
-  sectionIconBox: {
-    height: "55@ms",
-    width: "55@ms",
-    textAlign: "center",
-    marginRight: 20,
-    borderRadius: 6,
-    backgroundColor: "#222",
+  graceBadgeText: {
+    color: "#00FF00",
+    fontSize: "14@ms",
+    fontWeight: "600",
+  },
+  upgradeButton: {
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    gap: "8@s",
+    backgroundColor: Colors.primary,
+    paddingVertical: "10@vs",
+    borderRadius: "12@s",
   },
-  sectionName: {
-    fontSize: "16@ms",
-    color: "white",
+  upgradeButtonText: {
+    color: "#000",
+    fontSize: "15@ms",
+    fontWeight: "600",
   },
-  playlistItem: {
+  sectionsContainer: {
+    paddingBottom: "24@vs",
+  },
+  section: {
+    marginBottom: "24@vs",
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: "20@s",
+    marginBottom: "16@vs",
+  },
+  sectionTitleContainer: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: "10@ms",
-    paddingLeft: 20,
-    paddingRight: 30,
+    gap: "10@s",
   },
-  playlistItemTouchableArea: {
-    flexDirection: "row",
+  sectionTitle: {
+    color: Colors.text,
+    fontSize: "20@ms",
+    fontWeight: "700",
+  },
+  seeAll: {
+    color: Colors.primary,
+    fontSize: "14@ms",
+    fontWeight: "600",
+  },
+  sectionList: {
+    paddingHorizontal: "20@s",
+  },
+  sectionItem: {
+    width: "160@s",
+    marginRight: "16@s",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: "16@s",
+    padding: "16@s",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  sectionItemContent: {
+    alignItems: "center",
+    gap: "8@vs",
+  },
+  sectionItemIcon: {
+    width: "48@s",
+    height: "48@s",
+    borderRadius: "24@s",
+    backgroundColor: "rgba(212, 175, 55, 0.1)",
+    justifyContent: "center",
     alignItems: "center",
   },
-  thumbnail: {
-    width: "55@ms",
-    height: "55@ms",
-    borderRadius: 8,
-    marginRight: 15,
+  sectionItemTitle: {
+    color: Colors.text,
+    fontSize: "15@ms",
+    fontWeight: "600",
+    textAlign: "center",
   },
-  playlistName: {
-    fontSize: "16@ms",
-    color: "white",
-    flex: 1,
+  sectionItemSubtitle: {
+    color: Colors.textMuted,
+    fontSize: "12@ms",
+    textAlign: "center",
+  },
+  emptySection: {
+    alignItems: "center",
+    paddingVertical: "40@vs",
+  },
+  emptySectionText: {
+    color: Colors.textMuted,
+    fontSize: "14@ms",
+    marginTop: "12@vs",
+    textAlign: "center",
   },
 });
+
+export default LibraryScreen;

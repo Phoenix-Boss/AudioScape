@@ -1,169 +1,158 @@
+// contexts/GlobalUIStateContext.tsx
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import TrackPlayer, { usePlaybackState, State } from 'react-native-track-player';
+import TrackPlayer, { usePlaybackState, State, Event, useTrackPlayerEvents } from 'react-native-track-player';
 import { triggerHaptic } from '@/helpers/haptics';
-
-interface Track {
-  id: string;
-  title: string;
-  artist: string;
-  thumbnail: string;
-  duration?: string;
-  plays?: string;
-}
 
 interface GlobalUIStateContextType {
   tabsVisible: boolean;
   tabsLocked: boolean;
   handleVisible: boolean;
   isMusicPlaying: boolean;
-  // Dummy playback state
-  currentTrack: Track | null;
-  dummyIsPlaying: boolean;
-  playbackProgress: number;
   // Methods
   setTabsVisible: (visible: boolean, isUserAction?: boolean) => void;
   resetNavigationState: () => void;
-  // Dummy playback methods
-  playTrack: (track: Track) => void;
-  toggleDummyPlayPause: () => void;
-  playNextTrack: () => void;
-  playPreviousTrack: () => void;
-  addToQueue: (track: Track) => void;
-  clearQueue: () => void;
+  setIsMusicPlaying: (playing: boolean) => void;
+  setHandleVisible: (visible: boolean) => void;
+  setTabsLocked: (locked: boolean) => void;
+  handleUserTappedHandle: () => void;
 }
 
 const GlobalUIStateContext = createContext<GlobalUIStateContextType | undefined>(undefined);
 
 export const GlobalUIStateProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [tabsVisible, setTabsVisibleState] = useState(false);
-  const [tabsLocked, setTabsLocked] = useState(false);
-  const [handleVisible, setHandleVisible] = useState(false);
+  const [tabsVisible, setTabsVisibleState] = useState(true);
+  const [tabsLocked, setTabsLockedState] = useState(false);
+  const [handleVisible, setHandleVisibleState] = useState(false);
+  const [isMusicPlaying, setIsMusicPlayingState] = useState(false);
   
-  // Dummy playback state
-  const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
-  const [dummyIsPlaying, setDummyIsPlaying] = useState(false);
-  const [playbackProgress, setPlaybackProgress] = useState(0);
-  const [queue, setQueue] = useState<Track[]>([]);
-  const [currentTrackIndex, setCurrentTrackIndex] = useState(-1);
-  
+  // Use the hook instead of calling TrackPlayer.getState()
   const playbackState = usePlaybackState();
-  const isMusicPlaying = playbackState.state === State.Playing || 
-                        playbackState.state === State.Buffering || 
-                        playbackState.state === State.Ready;
+  const currentPlaybackState = playbackState.state;
 
-  // Simulate progress when dummy playing
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
+  // Listen to track player events to sync UI state
+  useTrackPlayerEvents([Event.PlaybackState, Event.PlaybackError], async (event) => {
+    if (event.type === Event.PlaybackState) {
+      const isNowPlaying = event.state === State.Playing || 
+                          event.state === State.Buffering || 
+                          event.state === State.Ready;
+      
+      setIsMusicPlayingState(isNowPlaying);
+      setHandleVisibleState(isNowPlaying);
+      
+      if (isNowPlaying) {
+        // When music starts playing, hide tabs by default (unless user already showed them)
+        if (!tabsLocked) {
+          setTabsVisibleState(false);
+        }
+      } else {
+        // When music stops, show tabs if not locked
+        if (!tabsLocked) {
+          setTabsVisibleState(true);
+        }
+        // Reset lock when music stops
+        setTabsLockedState(false);
+      }
+    }
     
-    if (dummyIsPlaying && currentTrack) {
-      interval = setInterval(() => {
-        setPlaybackProgress(prev => {
-          if (prev >= 100) {
-            // Song ended, play next if available
-            if (queue.length > currentTrackIndex + 1) {
-              const nextTrack = queue[currentTrackIndex + 1];
-              triggerHaptic('light');
-              setCurrentTrack(nextTrack);
-              setCurrentTrackIndex(prevIdx => prevIdx + 1);
-              return 0;
-            } else {
-              setDummyIsPlaying(false);
-              return 0;
-            }
-          }
-          return prev + 0.5; // 0.5% per second
-        });
-      }, 1000);
+    if (event.type === Event.PlaybackError) {
+      console.warn('Playback error:', event);
+      setIsMusicPlayingState(false);
+      setHandleVisibleState(false);
+      // Reset lock on error
+      setTabsLockedState(false);
     }
+  });
 
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [dummyIsPlaying, currentTrack, queue, currentTrackIndex]);
-
+  // Initial check for playback state - SIMPLIFIED VERSION
   useEffect(() => {
-    setHandleVisible(isMusicPlaying || dummyIsPlaying);
-    if (!isMusicPlaying && !dummyIsPlaying) {
-      setTabsVisibleState(false);
-      setTabsLocked(false);
+    const checkInitialPlaybackState = () => {
+      try {
+        const isNowPlaying = currentPlaybackState === State.Playing || 
+                            currentPlaybackState === State.Buffering || 
+                            currentPlaybackState === State.Ready;
+        
+        setIsMusicPlayingState(isNowPlaying);
+        setHandleVisibleState(isNowPlaying);
+        
+        // Set initial tabs visibility based on music state
+        if (isNowPlaying) {
+          setTabsVisibleState(false); // Hide tabs if music is playing
+        } else {
+          setTabsVisibleState(true); // Show tabs if no music
+        }
+        
+        console.log('Initial playback state checked:', State[currentPlaybackState]);
+      } catch (error) {
+        console.warn('Error checking initial playback state:', error);
+        // Default to no music playing on error
+        setIsMusicPlayingState(false);
+        setHandleVisibleState(false);
+        setTabsVisibleState(true);
+      }
+    };
+    
+    checkInitialPlaybackState();
+  }, [currentPlaybackState]);
+
+  // Update handle visibility based on playback state
+  useEffect(() => {
+    const isNowPlaying = currentPlaybackState === State.Playing || 
+                        currentPlaybackState === State.Buffering || 
+                        currentPlaybackState === State.Ready;
+    
+    setIsMusicPlayingState(isNowPlaying);
+    setHandleVisibleState(isNowPlaying);
+    
+    // Auto-manage tabs based on music state
+    if (isNowPlaying && !tabsLocked) {
+      setTabsVisibleState(false); // Hide tabs when music starts
+    } else if (!isNowPlaying && !tabsLocked) {
+      setTabsVisibleState(true); // Show tabs when music stops
     }
-  }, [isMusicPlaying, dummyIsPlaying]);
+  }, [currentPlaybackState, tabsLocked]);
 
   const setTabsVisible = useCallback((visible: boolean, isUserAction: boolean = false) => {
     setTabsVisibleState(visible);
-    if (isUserAction && visible) setTabsLocked(true);
-    if (isUserAction && !visible) setTabsLocked(false);
+    if (isUserAction) {
+      // When user manually controls tabs, set lock accordingly
+      setTabsLockedState(visible); // Lock if showing, unlock if hiding
+    }
   }, []);
+
+  const setTabsLocked = useCallback((locked: boolean) => {
+    setTabsLockedState(locked);
+  }, []);
+
+  // Handle user tapping the handle (called from FloatingPlayer)
+  const handleUserTappedHandle = useCallback(() => {
+    if (!isMusicPlaying) return;
+    
+    const newVisibility = !tabsVisible;
+    
+    if (newVisibility) {
+      // User is SHOWING tabs - set user intent and lock
+      setTabsLockedState(true);
+      setTabsVisibleState(true);
+      triggerHaptic(); // Add haptic feedback
+    } else {
+      // User is HIDING tabs - clear user intent and unlock
+      setTabsLockedState(false);
+      setTabsVisibleState(false);
+      triggerHaptic(); // Add haptic feedback
+    }
+  }, [isMusicPlaying, tabsVisible]);
 
   const resetNavigationState = useCallback(() => {
     setTabsVisibleState(false);
-    setTabsLocked(false);
+    setTabsLockedState(false);
   }, []);
 
-  // Dummy playback methods
-  const playTrack = useCallback((track: Track) => {
-    triggerHaptic('medium');
-    
-    setQueue(prevQueue => {
-      const trackIndex = prevQueue.findIndex(t => t.id === track.id);
-      if (trackIndex !== -1) {
-        // Track is in queue, play it
-        setCurrentTrack(track);
-        setCurrentTrackIndex(trackIndex);
-        setDummyIsPlaying(true);
-        setPlaybackProgress(0);
-        return prevQueue;
-      } else {
-        // New track, add to queue and play
-        const newQueue = [...prevQueue, track];
-        setCurrentTrack(track);
-        setCurrentTrackIndex(newQueue.length - 1);
-        setDummyIsPlaying(true);
-        setPlaybackProgress(0);
-        return newQueue;
-      }
-    });
+  const setIsMusicPlaying = useCallback((playing: boolean) => {
+    setIsMusicPlayingState(playing);
   }, []);
 
-  const toggleDummyPlayPause = useCallback(() => {
-    triggerHaptic('light');
-    setDummyIsPlaying(prev => !prev);
-  }, []);
-
-  const playNextTrack = useCallback(() => {
-    triggerHaptic('light');
-    if (queue.length > currentTrackIndex + 1) {
-      const nextTrack = queue[currentTrackIndex + 1];
-      setCurrentTrack(nextTrack);
-      setCurrentTrackIndex(prev => prev + 1);
-      setPlaybackProgress(0);
-    }
-  }, [queue, currentTrackIndex]);
-
-  const playPreviousTrack = useCallback(() => {
-    triggerHaptic('light');
-    if (currentTrackIndex > 0) {
-      const prevTrack = queue[currentTrackIndex - 1];
-      setCurrentTrack(prevTrack);
-      setCurrentTrackIndex(prev => prev - 1);
-      setPlaybackProgress(0);
-    } else if (currentTrack) {
-      // Restart current track
-      setPlaybackProgress(0);
-    }
-  }, [queue, currentTrackIndex, currentTrack]);
-
-  const addToQueue = useCallback((track: Track) => {
-    setQueue(prev => [...prev, track]);
-    triggerHaptic('light');
-  }, []);
-
-  const clearQueue = useCallback(() => {
-    setQueue([]);
-    setCurrentTrack(null);
-    setCurrentTrackIndex(-1);
-    setDummyIsPlaying(false);
-    setPlaybackProgress(0);
+  const setHandleVisible = useCallback((visible: boolean) => {
+    setHandleVisibleState(visible);
   }, []);
 
   return (
@@ -172,20 +161,13 @@ export const GlobalUIStateProvider: React.FC<{ children: React.ReactNode }> = ({
       tabsLocked,
       handleVisible,
       isMusicPlaying,
-      // Dummy playback state
-      currentTrack,
-      dummyIsPlaying,
-      playbackProgress,
       // Methods
       setTabsVisible,
       resetNavigationState,
-      // Dummy playback methods
-      playTrack,
-      toggleDummyPlayPause,
-      playNextTrack,
-      playPreviousTrack,
-      addToQueue,
-      clearQueue,
+      setIsMusicPlaying,
+      setHandleVisible,
+      setTabsLocked,
+      handleUserTappedHandle,
     }}>
       {children}
     </GlobalUIStateContext.Provider>

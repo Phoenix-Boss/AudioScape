@@ -1,3 +1,4 @@
+// app/(tabs)/_layout.tsx
 import React, { useRef, useEffect } from "react";
 import { View, StyleSheet, TouchableOpacity, Text } from "react-native";
 import { Tabs, useRouter, useSegments } from "expo-router";
@@ -9,11 +10,6 @@ import FloatingPlayer from "@/components/FloatingPlayer";
 import { Ionicons } from "@expo/vector-icons";
 import { triggerHaptic } from "@/helpers/haptics";
 import { useGlobalUIState } from "@/contexts/GlobalUIStateContext";
-import Animated, {
-  useAnimatedStyle,
-  withTiming,
-  Easing,
-} from "react-native-reanimated";
 
 const COLORS = {
   goldPrimary: "#D4AF37",
@@ -41,9 +37,6 @@ function TabLayoutContent() {
   const segments = useSegments();
   
   const {
-    tabsVisible,
-    tabsLocked,
-    isMusicPlaying,
     resetNavigationState,
   } = useGlobalUIState();
 
@@ -57,24 +50,14 @@ function TabLayoutContent() {
     }
   }, [segments, resetNavigationState]);
 
-  // Tab animation: slide DOWN to hide, slide UP to show
-  // When visible: translateY = 0 (at bottom edge)
-  // When hidden: translateY = TAB_HEIGHT + safeAreaBottom (off screen below)
-  const tabAnimatedStyle = useAnimatedStyle(() => {
-    const translateY = tabsVisible 
-      ? 0 
-      : TAB_HEIGHT + safeAreaBottom;
-    
-    return {
-      transform: [{ translateY }],
-    };
-  }, [tabsVisible, safeAreaBottom]);
-
   const handleTabPress = (tabName: string) => {
     triggerHaptic();
-    router.push(`/${tabName}`);
+    router.push(`/(tabs)/${tabName}`);
   };
 
+  // Check if we're on the player screen
+  const isPlayerScreen = segments[0] === '(player)';
+  
   const tabs = [
     { name: "index", title: "Home", icon: "home", iconOutline: "home-outline" },
     { name: "search", title: "Search", icon: "search", iconOutline: "search-outline" },
@@ -142,48 +125,52 @@ function TabLayoutContent() {
         />
       </Tabs>
 
-      {/* CUSTOM TAB BAR - Slides DOWN to hide, UP to show */}
-      <Animated.View 
-        style={[
-          styles.customTabBar,
-          { 
-            height: TAB_HEIGHT + safeAreaBottom,
-            paddingBottom: safeAreaBottom,
-          },
-          tabAnimatedStyle
-        ]}
-      >
-        <LinearGradient
-          colors={[
-            "rgba(18,18,18,0.98)",
-            "rgba(18,18,18,0.95)",
-            COLORS.surfaceDark
-          ]}
-          style={StyleSheet.absoluteFill}
-        />
-        
-        <View style={styles.tabBarGoldBorder} />
-        
-        <View style={styles.tabButtonsContainer}>
-          {tabs.map((tab) => (
-            <TouchableOpacity
-              key={tab.name}
-              style={styles.tabButton}
-              onPress={() => handleTabPress(tab.name)}
-              activeOpacity={0.8}
-            >
-              <Ionicons
-                name={tab.icon}
-                size={24}
-                color={COLORS.goldShimmer}
-              />
-              <Text style={styles.tabLabel}>{tab.title}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </Animated.View>
-      
-      <FloatingPlayer />
+      {/* Only show tab bar and floating player when NOT on player screen */}
+      {!isPlayerScreen && (
+        <>
+          {/* CUSTOM TAB BAR */}
+          <View 
+            style={[
+              styles.customTabBar,
+              { 
+                height: TAB_HEIGHT + safeAreaBottom,
+                paddingBottom: safeAreaBottom,
+              }
+            ]}
+          >
+            <LinearGradient
+              colors={[
+                "rgba(18,18,18,0.98)",
+                "rgba(18,18,18,0.95)",
+                COLORS.surfaceDark
+              ]}
+              style={StyleSheet.absoluteFill}
+            />
+            
+            <View style={styles.tabBarGoldBorder} />
+            
+            <View style={styles.tabButtonsContainer}>
+              {tabs.map((tab) => (
+                <TouchableOpacity
+                  key={tab.name}
+                  style={styles.tabButton}
+                  onPress={() => handleTabPress(tab.name)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name={tab.icon}
+                    size={24}
+                    color={COLORS.goldShimmer}
+                  />
+                  <Text style={styles.tabLabel}>{tab.title}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+          
+          <FloatingPlayer />
+        </>
+      )}
     </View>
   );
 }

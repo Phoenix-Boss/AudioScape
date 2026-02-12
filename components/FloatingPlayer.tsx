@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef } from "react";
 import {
   View,
   Text,
@@ -6,84 +6,89 @@ import {
   Image,
   StyleSheet,
   Dimensions,
+  Platform,
+  GestureResponderEvent,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { triggerHaptic } from "@/helpers/haptics";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useActiveTrack, usePlaybackState, useProgress } from "react-native-track-player";
-import { State } from "react-native-track-player";
+import {
+  useActiveTrack,
+  usePlaybackState,
+  useProgress,
+  TrackPlayer,
+  State,
+} from "react-native-track-player";
 import Animated, {
   useAnimatedStyle,
   withTiming,
-  Easing,
 } from "react-native-reanimated";
 import { useGlobalUIState } from "@/contexts/GlobalUIStateContext";
 
 const { width } = Dimensions.get("window");
 
-const COLORS = {
-  background: "#000000",
-  surface: "#121212",
-  surfaceLight: "#1F1F1F",
-  surfaceDark: "#0A0A0A",
-  goldPrimary: "#D4AF37",
-  goldShiny: "#FFD700",
-  goldRich: "#BF9B30",
-  goldShimmer: "#E6C16A",
-  textPrimary: "#FFFFFF",
-  textSecondary: "#B3B3B3",
-  textTertiary: "#808080",
-  border: "#333333",
-  white: "#FFFFFF",
-};
+interface FloatingPlayerProps {
+  tabHeight?: number;
+}
 
-const TAB_HEIGHT = 56;
-const NOW_PLAYING_HEIGHT = 68;
-const HANDLE_WIDTH = 40;
-const HANDLE_HEIGHT = 4;
-const HANDLE_VERTICAL_OFFSET = 12;
-
-interface FloatingPlayerProps {}
-
-export default function FloatingPlayer({}: FloatingPlayerProps) {
+export default function FloatingPlayer({
+  tabHeight = 56,
+}: FloatingPlayerProps) {
   const router = useRouter();
-  const { bottom: safeAreaBottom } = useSafeAreaInsets();
   const activeTrack = useActiveTrack();
   const playbackState = usePlaybackState();
   const isPlaying = playbackState.state === State.Playing;
-  
-  const {
-    tabsVisible,
-    setTabsVisible,
-    handleVisible,
-    isMusicPlaying,
-  } = useGlobalUIState();
-  
-  const { position, duration } = useProgress();
-  const progressPercentage = duration > 0 ? (position / duration) * 100 : 0;
 
-  const togglePlay = () => {
+  const { handleVisible, isMusicPlaying } = useGlobalUIState();
+
+  const { position, duration } = useProgress();
+  const progressPercentage = duration > 0 ? position / duration : 0;
+  const progressBarRef = useRef<View>(null);
+
+  const togglePlay = async () => {
     triggerHaptic();
-    console.log("Toggle play");
+    try {
+      if (isPlaying) {
+        await TrackPlayer.pause();
+      } else {
+        await TrackPlayer.play();
+      }
+    } catch (error) {
+      console.error("Error toggling playback:", error);
+    }
   };
 
-  const playNextSong = () => {
+  const playNextSong = async () => {
     triggerHaptic();
-    console.log("Play next song");
+    try {
+      await TrackPlayer.skipToNext();
+    } catch (error) {
+      console.error("Error playing next song:", error);
+    }
   };
 
   const openPlayerScreen = () => {
     triggerHaptic();
     if (!activeTrack) return;
 
-    router.push("/player");
+    router.push("/(player)");
   };
 
-  const toggleTabs = () => {
-    triggerHaptic();
-    const newVisibility = !tabsVisible;
-    setTabsVisible(newVisibility, true);
+  const handleProgressBarPress = async (event: GestureResponderEvent) => {
+    if (!progressBarRef.current || !duration) return;
+
+    triggerHaptic("light");
+
+    try {
+      const touchX = event.nativeEvent.locationX;
+      progressBarRef.current.measure((x, y, progressWidth) => {
+        const percentage = Math.max(0, Math.min(1, touchX / progressWidth));
+        const seekPosition = duration * percentage;
+        TrackPlayer.seekTo(seekPosition);
+      });
+    } catch (error) {
+      console.error("Error seeking:", error);
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -92,22 +97,19 @@ export default function FloatingPlayer({}: FloatingPlayerProps) {
     return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
   };
 
-  const playbackUnitBottom = tabsVisible 
-    ? TAB_HEIGHT + safeAreaBottom 
-    : safeAreaBottom;
+  // Position the player directly above the tab bar, edge to edge
+  const floatingPlayerBottom = tabHeight + 45; // 4px gap above tab bar
+  const floatingPlayerWidth = width; // Full width edge-to-edge
 
-  const playbackUnitAnimatedStyle = useAnimatedStyle(() => {
+  const animatedStyle = useAnimatedStyle(() => {
     return {
-      bottom: withTiming(playbackUnitBottom, {
-        duration: 300,
-        easing: Easing.inOut(Easing.ease),
-      }),
+      bottom: withTiming(floatingPlayerBottom, { duration: 300 }),
     };
-  }, [playbackUnitBottom]);
+  }, [floatingPlayerBottom]);
 
   const progressAnimatedStyle = useAnimatedStyle(() => {
     return {
-      width: `${progressPercentage}%`,
+      width: `${progressPercentage * 100}%`,
     };
   }, [progressPercentage]);
 
@@ -116,33 +118,45 @@ export default function FloatingPlayer({}: FloatingPlayerProps) {
   }
 
   return (
-    <Animated.View 
+    <Animated.View
       style={[
-        styles.playbackUnitContainer,
-        playbackUnitAnimatedStyle
+        styles.floatingWrapper,
+        { width: floatingPlayerWidth },
+        animatedStyle,
       ]}
     >
-      <TouchableOpacity
-        style={styles.handleContainer}
-        onPress={toggleTabs}
-        activeOpacity={0.7}
-        hitSlop={{ top: 16, bottom: 16, left: 20, right: 20 }}
-      >
-        <View style={styles.handleBar} />
-      </TouchableOpacity>
+      {/* Glass blur base layer */}
+      <View style={styles.glassBaseLayer}>
+        {/* Subtle gradient overlay for depth */}
+        <View style={styles.glassGradientOverlay} />
 
-      <TouchableOpacity 
-        style={styles.nowPlayingCard}
-        onPress={openPlayerScreen}
-        activeOpacity={0.9}
-      >
-        <View style={styles.nowPlayingBackground} />
-        
-        <View style={styles.progressContainer}>
-          <Animated.View style={[styles.progressFill, progressAnimatedStyle]} />
-        </View>
-        
-        <View style={styles.nowPlayingContent}>
+        {/* Glass texture effect */}
+        <View style={styles.glassTexture} />
+      </View>
+
+      <View style={[styles.floatingCard, { width: floatingPlayerWidth }]}>
+        {/* Main content */}
+        <TouchableOpacity
+          style={styles.contentContainer}
+          onPress={openPlayerScreen}
+          activeOpacity={0.9}
+        >
+          {/* Progress Bar Container - Moved to top of player */}
+          <View style={styles.progressContainer}>
+            <TouchableOpacity
+              style={styles.progressTouchArea}
+              onPress={handleProgressBarPress}
+              activeOpacity={0.9}
+              ref={progressBarRef}
+            >
+              <View style={styles.progressBackground} />
+              <Animated.View
+                style={[styles.progressBar, progressAnimatedStyle]}
+              />
+            </TouchableOpacity>
+          </View>
+
+          {/* Album Art */}
           <View style={styles.albumArtContainer}>
             {activeTrack.artwork ? (
               <Image
@@ -151,11 +165,16 @@ export default function FloatingPlayer({}: FloatingPlayerProps) {
               />
             ) : (
               <View style={styles.albumArtPlaceholder}>
-                <Ionicons name="musical-notes" size={24} color={COLORS.textSecondary} />
+                <Ionicons
+                  name="musical-notes"
+                  size={24}
+                  color="rgba(255, 255, 255, 0.7)"
+                />
               </View>
             )}
           </View>
-          
+
+          {/* Track Info */}
           <View style={styles.trackInfo}>
             <Text style={styles.trackTitle} numberOfLines={1}>
               {activeTrack.title || "Unknown Title"}
@@ -164,174 +183,231 @@ export default function FloatingPlayer({}: FloatingPlayerProps) {
               {activeTrack.artist || "Unknown Artist"}
             </Text>
           </View>
-          
+
+          {/* Controls */}
           <View style={styles.controls}>
-            <TouchableOpacity 
-              style={styles.playPauseButton}
-              onPress={(e) => {
-                e.stopPropagation();
-                togglePlay();
-              }}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Ionicons 
-                name={isPlaying ? "pause" : "play"} 
-                size={24} 
-                color={COLORS.textPrimary} 
-              />
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.nextButton}
+            <TouchableOpacity
+              style={[styles.controlButton, styles.nextButton]}
               onPress={(e) => {
                 e.stopPropagation();
                 playNextSong();
               }}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Ionicons 
-                name="play-skip-forward" 
-                size={20} 
-                color={COLORS.textPrimary} 
+              <Ionicons name="play-skip-forward" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.controlButton, styles.playButton]}
+              onPress={(e) => {
+                e.stopPropagation();
+                togglePlay();
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons
+                name={isPlaying ? "pause" : "play"}
+                size={22}
+                color="#FFFFFF"
               />
             </TouchableOpacity>
           </View>
-        </View>
-      </TouchableOpacity>
+        </TouchableOpacity>
+      </View>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  playbackUnitContainer: {
+  floatingWrapper: {
     position: "absolute",
     left: 0,
     right: 0,
     zIndex: 999,
   },
-  
-  handleContainer: {
-    position: "absolute",
-    top: -HANDLE_VERTICAL_OFFSET,
-    left: 0,
-    right: 0,
-    height: HANDLE_HEIGHT + 8,
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 1000,
-  },
-  
-  handleBar: {
-    width: HANDLE_WIDTH,
-    height: HANDLE_HEIGHT,
-    backgroundColor: COLORS.goldShimmer,
-    borderRadius: 2,
-    opacity: 0.9,
-  },
-  
-  nowPlayingCard: {
-    marginHorizontal: 16,
-    height: NOW_PLAYING_HEIGHT,
-    backgroundColor: COLORS.surfaceDark,
-    borderRadius: 16,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 14,
-  },
-  
-  nowPlayingBackground: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: COLORS.surfaceDark,
-  },
-  
-  progressContainer: {
-    position: "absolute",
-    top: 8,
-    left: 0,
-    right: 0,
-    height: 2,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    overflow: "hidden",
-  },
-  
-  progressFill: {
-    height: "100%",
-    backgroundColor: COLORS.goldPrimary,
-  },
-  
-  nowPlayingContent: {
+
+  floatingCard: {
+    height: 55,
+    borderRadius: 0,
+    padding: 12,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingTop: 20,
-    height: "100%",
+    backgroundColor: "transparent",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 255, 255, 0.15)",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(0, 0, 0, 0.1)",
+
+    // Enhanced shadow for better separation from tab bar
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: -4,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 20,
   },
-  
+
+  glassBaseLayer: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: Platform.select({
+      ios: "rgba(40, 40, 45, 0.75)", // Dark glass for iOS
+      android: "rgba(35, 35, 40, 0.85)", // Slightly more opaque for Android
+      default: "rgba(38, 38, 43, 0.8)",
+    }),
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 255, 255, 0.12)",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(0, 0, 0, 0.2)",
+  },
+
+  glassGradientOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "transparent",
+    backgroundImage:
+      "linear-gradient(to bottom, rgba(255,255,255,0.08), rgba(255,255,255,0.02))",
+  },
+
+  glassTexture: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "transparent",
+    opacity: 0.03,
+  },
+
+  contentContainer: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+    zIndex: 1,
+  },
+
   albumArtContainer: {
     marginRight: 12,
+    zIndex: 1,
   },
-  
+
   albumArt: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: COLORS.surface,
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
   },
-  
+
   albumArtPlaceholder: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: COLORS.surface,
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
     justifyContent: "center",
     alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
   },
-  
+
   trackInfo: {
     flex: 1,
-    marginRight: 12,
-    overflow: "hidden",
+    justifyContent: "center",
+    marginRight: 10,
+    zIndex: 1,
   },
-  
+
   trackTitle: {
+    color: "#FFFFFF",
     fontSize: 14,
     fontWeight: "600",
-    color: COLORS.textPrimary,
+    letterSpacing: 0.3,
     marginBottom: 2,
-    letterSpacing: -0.3,
+    textShadowColor: "rgba(0, 0, 0, 0.5)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
-  
+
   trackArtist: {
+    color: "rgba(255, 255, 255, 0.85)",
     fontSize: 12,
-    fontWeight: "400",
-    color: COLORS.textSecondary,
-    letterSpacing: -0.3,
+    letterSpacing: 0.2,
+    textShadowColor: "rgba(0, 0, 0, 0.4)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
-  
+
   controls: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    zIndex: 1,
   },
-  
-  playPauseButton: {
+
+  controlButton: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  nextButton: {
     width: 32,
     height: 32,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
     borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    marginLeft: 6,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
   },
-  
-  nextButton: {
-    width: 28,
-    height: 28,
+
+  playButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.3)",
+    marginLeft: 8,
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+
+  progressContainer: {
+    position: "absolute",
+    bottom: 50,
+    left: 16,
+    right: 16,
+    height: 3,
+    borderRadius: 2,
+    overflow: "hidden",
+    zIndex: 2,
+  },
+
+  progressTouchArea: {
+    flex: 1,
     justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    borderRadius: 14,
+  },
+
+  progressBackground: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+  },
+
+  progressBar: {
+    position: "absolute",
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "#FFFFFF",
+    shadowColor: "#FFF",
+    shadowOffset: {
+      width: 0,
+      height: 0,
+    },
+    shadowOpacity: 0.5,
+    shadowRadius: 2,
+    elevation: 2,
   },
 });

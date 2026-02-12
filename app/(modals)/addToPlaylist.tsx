@@ -1,239 +1,168 @@
-/**
- * This file defines the `AddToPlaylistModal` component, a modal screen
- * that allows users to add the currently playing or selected song to an existing playlist
- * or create a new one. It integrates with the Redux store for playlist management.
- */
-
-import CreatePlaylistModal from "@/app/(modals)/createPlaylist";
-import VerticalDismiss from "@/components/navigation/VerticalArrowDismiss";
+import React, { useState } from "react";
+import { View, Text, TextInput, TouchableOpacity, FlatList, ActivityIndicator } from "react-native";
+import { useRouter, useLocalSearchParams } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MaterialIcons } from "@expo/vector-icons";
+import { ScaledSheet, moderateScale } from "react-native-size-matters/extend";
 import { Colors } from "@/constants/Colors";
-import { unknownTrackImageUri } from "@/constants/images";
 import { triggerHaptic } from "@/helpers/haptics";
 import { usePlaylists } from "@/store/library";
-import { FlashList } from "@shopify/flash-list";
-import { Image } from "@d11/react-native-fast-image";
-import { Entypo } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
-import { useLocalSearchParams } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
-import { Text, ToastAndroid, TouchableOpacity, View } from "react-native";
-import { Divider } from "react-native-paper";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ScaledSheet, moderateScale } from "react-native-size-matters/extend";
+import VerticalSwipeGesture from "@/components/navigation/VerticalGesture";
+import { useGracePeriod } from "@/services/mavin";
 
-/**
- * `AddToPlaylistModal` component.
- * Displays a list of existing playlists and an option to create a new one.
- * Allows adding the current or a specified song to a selected playlist.
- *
- * @returns The rendered modal component.
- */
-export default function AddToPlaylistModal() {
-  const { playlists, addTrackToPlaylist, createNewPlaylist } = usePlaylists();
+const AddToPlaylistModal = () => {
   const { bottom } = useSafeAreaInsets();
-  const params = useLocalSearchParams();
-  const [isScrolling, setIsScrolling] = useState<boolean>(false);
-  const [modalVisible, setModalVisible] = useState(false);
+  const router = useRouter();
+  const { track } = useLocalSearchParams<{ track?: string }>();
+  const { playlists, addTrackToPlaylist, createPlaylist } = usePlaylists();
+  const { isPremium } = useGracePeriod(); // Premium status for cloud sync
+  
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  
+  const song = track ? JSON.parse(track) : null;
+  
+  // Filter playlists by search query
+  const filteredPlaylists = Object.entries(playlists)
+    .filter(([name]) => 
+      name.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    .map(([name, songs]) => ({ name, songCount: songs.length }));
 
-  // Convert the playlists object into an array for FlashList rendering.
-  const playlistArray = useMemo(
-    () =>
-      Object.entries(playlists).map(([name, tracks]) => ({
-        name,
-        thumbnail: tracks[0]?.thumbnail ?? null,
-      })),
-    [playlists],
-  );
-
-  /**
-   * Handles the creation of a new playlist.
-   * @param playlistName - The name of the new playlist.
-   */
-  const handleCreatePlaylist = (playlistName: string) => {
-    if (playlists[playlistName]) {
-      triggerHaptic(Haptics.AndroidHaptics.Reject);
-      ToastAndroid.show(
-        "A playlist with this name already exists.",
-        ToastAndroid.SHORT,
-      );
-      return;
+  const handleAddToPlaylist = async (playlistName: string) => {
+    triggerHaptic("light");
+    if (!song) return;
+    
+    try {
+      setIsLoading(true);
+      await addTrackToPlaylist(playlistName, song);
+      
+      // Premium users: Sync to cloud (pseudo-code - implement actual sync)
+      if (isPremium) {
+        console.log(`[Mavin] Syncing "${song.title}" to cloud playlist: ${playlistName}`);
+        // await cloudPlaylistService.syncTrack(playlistName, song.id);
+      }
+      
+      router.back();
+    } finally {
+      setIsLoading(false);
     }
-    triggerHaptic();
-    createNewPlaylist(playlistName);
-    setModalVisible(false);
   };
 
-  // Determine the track to add.
-  const track = useMemo(() => {
-    return params?.track ? JSON.parse(params.track as string) : null;
-  }, [params]);
-
-  /**
-   * Renders an individual playlist item in the FlashList.
-   * @param item - The playlist item to render.
-   * @param handleDismiss - Function to dismiss the modal.
-   * @returns A TouchableOpacity component representing a playlist.
-   */
-  const renderPlaylistItem = useCallback(
-    (
-      { item }: { item: { name: string; thumbnail: string | null } },
-      handleDismiss: () => void,
-    ) => (
-      <TouchableOpacity
-        style={styles.playlistItem}
-        onPress={() => {
-          triggerHaptic();
-          ToastAndroid.show(`Added song to ${item.name}`, ToastAndroid.SHORT);
-          if (track) addTrackToPlaylist(track, item.name);
-          handleDismiss(); // Dismiss the modal after adding.
-          console.log(`Selected playlist: ${item.name}`);
-        }}
-      >
-        <FastImage
-          source={{ uri: item.thumbnail ?? unknownTrackImageUri }}
-          style={styles.thumbnail}
-        />
-        <Text style={styles.playlistName}>{item.name}</Text>
-      </TouchableOpacity>
-    ),
-    [track, addTrackToPlaylist],
-  );
+  const handleCreatePlaylist = () => {
+    triggerHaptic("light");
+    router.push({
+      pathname: "/(modals)/createPlaylist",
+      params: { track: JSON.stringify(song) },
+    });
+  };
 
   return (
-    <VerticalDismiss>
-      {(handleDismiss) => (
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.header}>
-              {/* Dismiss button */}
-              <Entypo
-                name="chevron-down"
-                size={moderateScale(28)}
-                style={styles.dismissButton}
-                activeOpacity={0.7}
-                color={Colors.text}
-                onPress={handleDismiss}
-              />
-
-              <Text style={styles.modalTitle}>Choose a playlist</Text>
-
-              {/* Button to create a new playlist */}
-              <TouchableOpacity
-                style={styles.createButton}
-                onPress={() => {
-                  triggerHaptic();
-                  setModalVisible(true);
-                }}
-              >
-                <Text style={styles.createButtonText}>+ New Playlist</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Divider that appears when scrolling */}
-            {isScrolling && (
-              <Divider
-                style={{
-                  backgroundColor: "rgba(255,255,255,0.3)",
-                  height: 0.3,
-                }}
-              />
-            )}
-
-            {/* List of playlists */}
-            <View style={{ flex: 1 }}>
-              <FlashList
-                data={playlistArray}
-                keyExtractor={(item) => item.name}
-                renderItem={(props) => renderPlaylistItem(props, handleDismiss)}
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={{
-                  paddingBottom: bottom + 10,
-                }}
-                onScroll={(e) => {
-                  const currentScrollPosition =
-                    Math.floor(e.nativeEvent.contentOffset.y) || 0;
-                  setIsScrolling(currentScrollPosition > 5);
-                }}
-                scrollEventThrottle={16}
-              />
-            </View>
-
-            {/* Modal for creating a new playlist */}
-            <CreatePlaylistModal
-              visible={modalVisible}
-              onCreate={handleCreatePlaylist}
-              onCancel={() => {
-                triggerHaptic();
-                setModalVisible(false);
-              }}
-            />
+    <View style={styles.container}>
+      <VerticalSwipeGesture>
+        <View style={[styles.modalContent, { paddingBottom: bottom + 20 }]}>
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => router.back()}>
+              <MaterialIcons name="close" size={28} color={Colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.title}>Add to Playlist</Text>
+            <View style={{ width: 28 }} />
           </View>
-        </View>
-      )}
-    </VerticalDismiss>
-  );
-}
 
-// Styles for the AddToPlaylistModal component.
+          {/* Search */}
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search playlists..."
+            placeholderTextColor={Colors.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+
+          {/* Playlist List */}
+          {isLoading ? (
+            <ActivityIndicator color={Colors.primary} style={styles.loader} />
+          ) : (
+            <FlatList
+              data={filteredPlaylists}
+              keyExtractor={item => item.name}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.playlistItem}
+                  onPress={() => handleAddToPlaylist(item.name)}
+                >
+                  <View style={styles.playlistInfo}>
+                    <Text style={styles.playlistName}>{item.name}</Text>
+                    <Text style={styles.playlistCount}>{item.songCount} songs</Text>
+                  </View>
+                  <MaterialIcons name="add" size={24} color={Colors.text} />
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={
+                <Text style={styles.emptyText}>
+                  {searchQuery ? "No playlists found" : "Create your first playlist!"}
+                </Text>
+              }
+            />
+          )}
+
+          {/* Create Button */}
+          <TouchableOpacity style={styles.createButton} onPress={handleCreatePlaylist}>
+            <MaterialIcons name="add" size={24} color="#000" />
+            <Text style={styles.createButtonText}>Create New Playlist</Text>
+          </TouchableOpacity>
+        </View>
+      </VerticalSwipeGesture>
+    </View>
+  );
+};
+
 const styles = ScaledSheet.create({
-  modalOverlay: {
-    flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(0, 0, 0, 0)",
-  },
+  container: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)" },
   modalContent: {
-    backgroundColor: "#101010",
-    borderTopLeftRadius: "25@ms",
-    borderTopRightRadius: "25@ms",
-    paddingTop: 20,
-    maxHeight: "60%",
-    flex: 1,
+    backgroundColor: "#151515",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingTop: 16,
   },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingHorizontal: 20,
+    paddingBottom: 16,
   },
-  dismissButton: {
-    position: "absolute",
-    left: 20,
-    top: "3@vs",
-  },
-  modalTitle: {
-    fontSize: "18@ms",
-    fontWeight: "bold",
+  title: { color: Colors.text, fontSize: 20, fontWeight: "700" },
+  searchInput: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 12,
+    padding: 12,
     color: Colors.text,
-    marginBottom: 10,
-    marginLeft: "35@s",
+    marginBottom: 16,
   },
   playlistItem: {
     flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 25,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.1)",
   },
-  thumbnail: {
-    width: "50@ms",
-    height: "50@ms",
-    borderRadius: 8,
-    marginRight: 15,
-  },
-  playlistName: {
-    fontSize: "16@ms",
-    color: Colors.text,
-    paddingRight: 50,
-  },
+  playlistInfo: { flex: 1 },
+  playlistName: { color: Colors.text, fontSize: 16, fontWeight: "600" },
+  playlistCount: { color: Colors.textMuted, fontSize: 13, marginTop: 2 },
+  emptyText: { color: Colors.textMuted, textAlign: "center", paddingVertical: 40 },
+  loader: { marginTop: 40 },
   createButton: {
-    backgroundColor: "white",
-    paddingVertical: "9@ms",
-    paddingHorizontal: "18@ms",
-    borderRadius: 20,
-    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: Colors.primary,
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 16,
   },
-  createButtonText: {
-    color: "black",
-    fontSize: "12@ms",
-    fontWeight: "bold",
-  },
+  createButtonText: { color: "#000", fontSize: 16, fontWeight: "600", marginLeft: 8 },
 });
+
+export default AddToPlaylistModal;

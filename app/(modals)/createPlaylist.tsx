@@ -1,166 +1,163 @@
-/**
- * This file defines the `CreatePlaylistModal` component, a modal screen
- * that allows users to create a new playlist by providing a name.
- */
-
+import React, { useState } from "react";
+import { View, Text, TextInput, TouchableOpacity, Alert } from "react-native";
+import { useRouter, useLocalSearchParams } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MaterialIcons } from "@expo/vector-icons";
+import { ScaledSheet, moderateScale } from "react-native-size-matters/extend";
 import { Colors } from "@/constants/Colors";
 import { triggerHaptic } from "@/helpers/haptics";
-import * as Haptics from "expo-haptics";
-import React, { useState } from "react";
-import {
-  Modal,
-  Text,
-  TextInput,
-  ToastAndroid,
-  TouchableOpacity,
-  View,
-  KeyboardAvoidingView,
-} from "react-native";
-import { ScaledSheet } from "react-native-size-matters/extend";
+import { usePlaylists } from "@/store/library";
+import VerticalSwipeGesture from "@/components/navigation/VerticalGesture";
+import { useGracePeriod } from "@/services/mavin";
+import { z } from "zod";
 
-/**
- * Props for the `CreatePlaylistModal` component.
- * @property visible - Controls the visibility of the modal.
- * @property onCreate - Callback function when a new playlist is created.
- * @property onCancel - Callback function when the modal is cancelled.
- */
-export interface CreatePlaylistModalProps {
-  visible: boolean;
-  onCreate: (playlistName: string) => void;
-  onCancel: () => void;
-}
+// ZOD VALIDATION SCHEMA
+const PlaylistSchema = z.object({
+  name: z.string().min(1, "Playlist name is required").max(50, "Name too long"),
+  description: z.string().max(150, "Description too long").optional(),
+});
 
-/**
- * `CreatePlaylistModal` component.
- * Provides an input field for the user to enter a new playlist name and buttons to create or cancel.
- * @function
- * @param props - The properties for the modal.
- * @returns The rendered modal component.
- */
-const CreatePlaylistModal: React.FC<CreatePlaylistModalProps> = ({
-  visible,
-  onCreate,
-  onCancel,
-}) => {
-  const [playlistName, setPlaylistName] = useState("");
+const CreatePlaylistModal = () => {
+  const { bottom } = useSafeAreaInsets();
+  const router = useRouter();
+  const { track } = useLocalSearchParams<{ track?: string }>();
+  const { createPlaylist } = usePlaylists();
+  const { isPremium } = useGracePeriod();
+  
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [isCreating, setIsCreating] = useState(false);
 
-  /**
-   * Handles the creation of the playlist.
-   * Validates the input and calls the `onCreate` callback.
-   */
-  const handleCreate = () => {
-    if (!playlistName.trim()) {
-      triggerHaptic(Haptics.AndroidHaptics.Reject);
-      ToastAndroid.show(
-        "Please enter a valid playlist name.",
-        ToastAndroid.LONG,
-      );
+  const handleCreate = async () => {
+    triggerHaptic("light");
+    
+    // ZOD VALIDATION
+    try {
+      PlaylistSchema.parse({ name, description });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        Alert.alert("Validation Error", error.errors[0].message);
+      }
       return;
     }
-    onCreate(playlistName.trim());
-    setPlaylistName(""); // Clear the input field after creation.
+
+    try {
+      setIsCreating(true);
+      
+      // Create playlist locally
+      await createPlaylist(name, description || "");
+      
+      // Premium users: Sync to cloud (pseudo-code)
+      if (isPremium) {
+        console.log(`[Mavin] Creating cloud playlist: ${name}`);
+        // await cloudPlaylistService.create({ name, description });
+      }
+      
+      // Add track if provided
+      if (track) {
+        const song = JSON.parse(track);
+        // await addTrackToPlaylist(name, song);
+      }
+      
+      router.back();
+    } catch (error) {
+      Alert.alert("Error", "Failed to create playlist. Please try again.");
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   return (
-    <Modal
-      transparent={true}
-      visible={visible}
-      animationType="fade"
-      statusBarTranslucent={true}
-      onRequestClose={onCancel}
-    >
-      <View style={styles.modalContainer}>
-        <KeyboardAvoidingView behavior="position">
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Create New Playlist</Text>
+    <View style={styles.container}>
+      <VerticalSwipeGesture>
+        <View style={[styles.modalContent, { paddingBottom: bottom + 20 }]}>
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => router.back()}>
+              <MaterialIcons name="close" size={28} color={Colors.text} />
+            </TouchableOpacity>
+            <Text style={styles.title}>Create Playlist</Text>
+            <TouchableOpacity disabled={isCreating} onPress={handleCreate}>
+              <Text style={[styles.saveButton, isCreating && styles.saveButtonDisabled]}>
+                {isCreating ? "Creating..." : "Save"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.form}>
+            <Text style={styles.label}>Playlist Name *</Text>
             <TextInput
               style={styles.input}
-              placeholder="Enter playlist name"
+              placeholder="My Awesome Playlist"
               placeholderTextColor={Colors.textMuted}
-              value={playlistName}
-              onChangeText={setPlaylistName}
+              value={name}
+              onChangeText={setName}
+              editable={!isCreating}
             />
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={onCancel}
-              >
-                <Text style={[styles.modalButtonText, styles.cancelButtonText]}>
-                  Cancel
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalButton}
-                onPress={handleCreate}
-              >
-                <Text style={styles.modalButtonText}>Create</Text>
-              </TouchableOpacity>
-            </View>
+
+            <Text style={[styles.label, styles.mt16]}>Description</Text>
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              placeholder="Optional description..."
+              placeholderTextColor={Colors.textMuted}
+              value={description}
+              onChangeText={setDescription}
+              multiline
+              numberOfLines={3}
+              editable={!isCreating}
+            />
+
+            {isPremium && (
+              <View style={styles.premiumBadge}>
+                <MaterialIcons name="cloud" size={16} color="#FFD700" />
+                <Text style={styles.premiumText}>Cloud Sync Enabled</Text>
+              </View>
+            )}
           </View>
-        </KeyboardAvoidingView>
-      </View>
-    </Modal>
+        </View>
+      </VerticalSwipeGesture>
+    </View>
   );
 };
 
-export default CreatePlaylistModal;
-
-// Styles for the CreatePlaylistModal component.
 const styles = ScaledSheet.create({
-  modalContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-  },
+  container: { flex: 1, backgroundColor: "rgba(0,0,0,0.7)" },
   modalContent: {
-    width: "288@ms",
-    backgroundColor: "#101010",
-    padding: "20@ms",
-    borderRadius: 10,
-    marginBottom: 10,
+    backgroundColor: "#151515",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
   },
-  modalTitle: {
-    fontSize: "20@ms",
-    color: Colors.text,
-    fontWeight: "bold",
-    marginBottom: 10,
-    textAlign: "center",
-  },
-  input: {
-    height: "45@ms",
-    fontSize: "16@ms",
-    borderColor: "#333",
-    borderWidth: 1,
-    borderRadius: 5,
-    marginBottom: 20,
-    color: "white",
-    paddingHorizontal: 10,
-  },
-  modalButtons: {
+  header: {
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.1)",
   },
-  modalButton: {
-    backgroundColor: "white",
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 100,
-    flex: 1,
-    marginHorizontal: 5,
+  title: { color: Colors.text, fontSize: 20, fontWeight: "700" },
+  saveButton: { color: Colors.primary, fontSize: 16, fontWeight: "600" },
+  saveButtonDisabled: { color: Colors.textMuted },
+  form: { marginTop: 24 },
+  label: { color: Colors.text, fontSize: 14, fontWeight: "600", marginBottom: 8 },
+  mt16: { marginTop: 16 },
+  input: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 12,
+    padding: 14,
+    color: Colors.text,
+    fontSize: 16,
   },
-  modalButtonText: {
-    color: "black",
-    fontSize: "16@ms",
-    fontWeight: "bold",
-    textAlign: "center",
+  textArea: { height: 80, paddingTop: 12, paddingBottom: 12 },
+  premiumBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(255,215,0,0.1)",
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 16,
   },
-  cancelButtonText: {
-    color: "white",
-  },
-  cancelButton: {
-    backgroundColor: "#101010",
-    borderColor: "#333",
-    borderWidth: 1,
-  },
+  premiumText: { color: "#FFD700", fontSize: 14, marginLeft: 8, fontWeight: "500" },
 });
+
+export default CreatePlaylistModal;

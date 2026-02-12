@@ -3,6 +3,7 @@ import TrackPlayer, {
   AppKilledPlaybackBehavior,
   Capability,
   RepeatMode,
+  Event,
 } from "react-native-track-player";
 
 // Global state
@@ -69,14 +70,27 @@ export async function initializeTrackPlayer(): Promise<boolean> {
           Capability.Pause,
           Capability.SkipToNext,
           Capability.SkipToPrevious,
-          Capability.Stop,
-          Capability.SeekTo,
+        ],
+        // Notification styling
+        compactCapabilities: [
+          Capability.Play,
+          Capability.Pause,
+          Capability.SkipToNext,
         ],
       });
 
       // Set the initial volume and repeat mode.
       await TrackPlayer.setVolume(1);
       await TrackPlayer.setRepeatMode(RepeatMode.Off);
+
+      // Set up event listeners for better state management
+      TrackPlayer.addEventListener(Event.PlaybackQueueEnded, () => {
+        console.log('[TrackPlayer] Queue ended');
+      });
+
+      TrackPlayer.addEventListener(Event.PlaybackError, (error) => {
+        console.error('[TrackPlayer] Playback error:', error);
+      });
 
       isInitialized = true;
       console.log('[TrackPlayer] Global initialization completed successfully');
@@ -116,3 +130,150 @@ export function resetTrackPlayerInitialization(): void {
   initializationPromise = null;
   console.log('[TrackPlayer] Reset initialization state');
 }
+
+/**
+ * Global track player service with helper methods
+ */
+export const trackPlayerService = {
+  /**
+   * Initialize the track player
+   */
+  initialize: initializeTrackPlayer,
+
+  /**
+   * Add tracks to queue
+   */
+  async addTracks(tracks: any[]) {
+    if (!isInitialized) {
+      await initializeTrackPlayer();
+    }
+    return await TrackPlayer.add(tracks);
+  },
+
+  /**
+   * Play a single track
+   */
+  async playTrack(track: any) {
+    if (!isInitialized) {
+      await initializeTrackPlayer();
+    }
+    await TrackPlayer.reset();
+    await TrackPlayer.add(track);
+    return await TrackPlayer.play();
+  },
+
+  /**
+   * Play a playlist starting from a specific index
+   */
+  async playPlaylist(tracks: any[], startIndex: number = 0) {
+    if (!isInitialized) {
+      await initializeTrackPlayer();
+    }
+    await TrackPlayer.reset();
+    await TrackPlayer.add(tracks);
+    if (startIndex > 0) {
+      await TrackPlayer.skip(startIndex);
+    }
+    return await TrackPlayer.play();
+  },
+
+  /**
+   * Get current playback state
+   */
+  async getPlaybackState() {
+    if (!isInitialized) {
+      await initializeTrackPlayer();
+    }
+    return await TrackPlayer.getPlaybackState();
+  },
+
+  /**
+   * Get current track
+   */
+  async getCurrentTrack() {
+    if (!isInitialized) {
+      await initializeTrackPlayer();
+    }
+    return await TrackPlayer.getCurrentTrack();
+  },
+
+  /**
+   * Get queue
+   */
+  async getQueue() {
+    if (!isInitialized) {
+      await initializeTrackPlayer();
+    }
+    return await TrackPlayer.getQueue();
+  },
+
+  /**
+   * Skip to next track
+   */
+  async skipToNext() {
+    if (!isInitialized) {
+      await initializeTrackPlayer();
+    }
+    return await TrackPlayer.skipToNext();
+  },
+
+  /**
+   * Skip to previous track
+   */
+  async skipToPrevious() {
+    if (!isInitialized) {
+      await initializeTrackPlayer();
+    }
+    return await TrackPlayer.skipToPrevious();
+  },
+
+  /**
+   * Play
+   */
+  async play() {
+    if (!isInitialized) {
+      await initializeTrackPlayer();
+    }
+    return await TrackPlayer.play();
+  },
+
+  /**
+   * Pause
+   */
+  async pause() {
+    if (!isInitialized) {
+      await initializeTrackPlayer();
+    }
+    return await TrackPlayer.pause();
+  },
+
+  /**
+   * Stop
+   */
+  async stop() {
+    if (!isInitialized) {
+      await initializeTrackPlayer();
+    }
+    return await TrackPlayer.stop();
+  },
+
+  /**
+   * Reset player
+   */
+  async reset() {
+    if (!isInitialized) {
+      await initializeTrackPlayer();
+    }
+    return await TrackPlayer.reset();
+  },
+
+  /**
+   * Seek to position
+   */
+  async seekTo(position: number) {
+    if (!isInitialized) {
+      await initializeTrackPlayer();
+    }
+    return await TrackPlayer.seekTo(position);
+  },
+};

@@ -29,6 +29,7 @@
     "event-target-polyfill": "^0.0.4",
     "expo": "~54.0.29",
     "expo-application": "~7.0.8",
+    "expo-blur": "^15.0.8",
     "expo-constants": "^18.0.10",
     "expo-dev-client": "~6.0.20",
     "expo-document-picker": "~14.0.8",
