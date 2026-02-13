@@ -8,7 +8,7 @@ import { Colors } from "@/constants/Colors";
 import { triggerHaptic } from "@/helpers/haptics";
 import { usePlaylists } from "@/store/library";
 import VerticalSwipeGesture from "@/components/navigation/VerticalGesture";
-import { useGracePeriod } from "@/services/mavin";
+import { useGracePeriod } from "@/services/mavin/monetization/GracePeriod";
 
 const AddToPlaylistModal = () => {
   const { bottom } = useSafeAreaInsets();

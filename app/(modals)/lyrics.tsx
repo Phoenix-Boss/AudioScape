@@ -9,7 +9,7 @@ import { triggerHaptic } from "@/helpers/haptics";
 import VerticalSwipeGesture from "@/components/navigation/VerticalGesture";
 import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
-import { errorFromUnknown, logError } from "@/services/mavin";
+import { errorFromUnknown, logError } from "@/services/mavin/core/errors";
 
 // ZOD VALIDATION FOR LYRICS
 const LyricsSchema = z.object({

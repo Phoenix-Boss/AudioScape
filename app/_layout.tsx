@@ -303,6 +303,22 @@ export default function RootLayout() {
                             animation: "slide_from_bottom",
                           }}
                         />
+
+                         <Stack.Screen
+                          name="(modals)/comments"
+                          options={{
+                            presentation: "transparentModal",
+                            animation: "slide_from_bottom",
+                          }}
+                        />
+                       <Stack.Screen
+                          name="(modals)/equalizer"
+                          options={{
+                            presentation: "transparentModal",
+                            animation: "slide_from_bottom",
+                          }}
+                        />
+
                         <Stack.Screen
                           name="(modals)/deletePlaylist"
                           options={{
@@ -317,6 +333,22 @@ export default function RootLayout() {
                             animation: "slide_from_bottom",
                           }}
                         />
+ <Stack.Screen
+                          name="(modals)/premium"
+                          options={{
+                            presentation: "transparentModal",
+                            animation: "slide_from_bottom",
+                          }}
+                        />
+
+                         <Stack.Screen
+                          name="(modals)/related"
+                          options={{
+                            presentation: "transparentModal",
+                            animation: "slide_from_bottom",
+                          }}
+                        />
+
                         <Stack.Screen
                           name="(modals)/lyrics"
                           options={{

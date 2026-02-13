@@ -391,7 +391,7 @@ export const createExtractionError = (
     [ERROR_CODES.GRACE_PERIOD_EXPIRED]: 'Free trial ended. Upgrade to continue ad-free.',
     [ERROR_CODES.PREMIUM_VERIFICATION_FAILED]: 'Premium verification failed. Checking status...',
     [ERROR_CODES.UNKNOWN_ERROR]: 'Unexpected error occurred. Please try again.',
-  };
+  } as Record<ErrorCode, string>;
 
   return new ExtractionError(
     message,
@@ -527,7 +527,7 @@ export const getErrorMessage = (error: BaseError): string => {
     [ERROR_CODES.VALIDATION_FAILED]: 'Validation failed',
     [ERROR_CODES.INVALID_STATE_TRANSITION]: 'State error',
     [ERROR_CODES.UNKNOWN_ERROR]: 'Error occurred',
-  };
+  } as Record<ErrorCode, string>;
   
   return messages[error.code] || messages[ERROR_CODES.UNKNOWN_ERROR];
 };

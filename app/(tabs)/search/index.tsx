@@ -12,7 +12,11 @@ import {
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { ScaledSheet, moderateScale, verticalScale } from "react-native-size-matters/extend";
+import {
+  ScaledSheet,
+  moderateScale,
+  verticalScale,
+} from "react-native-size-matters/extend";
 import { Colors } from "@/constants/Colors";
 import { defaultStyles } from "@/styles";
 import { triggerHaptic } from "@/helpers/haptics";
@@ -23,7 +27,7 @@ import { useQuery } from "@tanstack/react-query";
 // MAVIN ENGINE INTEGRATIONS
 // ============================================================================
 import { useGracePeriod } from "@/services/mavin/monetization/GracePeriod";
-import { useMavinEngine } from "@/services/mavin/core/Engine";
+import { useMavinEngine } from "@/services/mavin/engine/Engine";
 import { useExtractionChamber } from "@/services/mavin/extraction/useExtractionChamber";
 import { MavinCache } from "@/services/mavin/core/CacheLayer";
 import { errorFromUnknown, logError } from "@/services/mavin/core/errors";
@@ -39,7 +43,7 @@ const SearchResultSchema = z.object({
   artwork: z.string().url().optional(),
   duration: z.number().int().positive(),
   videoId: z.string(),
-  type: z.enum(['song', 'artist', 'album', 'playlist']),
+  type: z.enum(["song", "artist", "album", "playlist"]),
 });
 
 type SearchResult = z.infer<typeof SearchResultSchema>;
@@ -59,13 +63,18 @@ const SearchScreen = () => {
   // SEARCH QUERY (TanStack Query with debounce)
   // ============================================================================
   const searchQuery = useQuery<SearchResult[]>({
-    queryKey: ['search', query],
+    queryKey: ["search", query],
     queryFn: async () => {
       if (query.trim().length < 2) return [];
-      
+
       // Check cache first (L1)
       try {
-        const cached = await MavinCache.get<SearchResult[]>(`search:${query}`, async () => { throw new Error('MISS'); });
+        const cached = await MavinCache.get<SearchResult[]>(
+          `search:${query}`,
+          async () => {
+            throw new Error("MISS");
+          },
+        );
         if (cached && cached.length > 0) {
           console.log(`[Mavin Search] Cache HIT for "${query}"`);
           return cached;
@@ -73,18 +82,44 @@ const SearchScreen = () => {
       } catch (e) {
         // Cache miss - proceed to extraction
       }
-      
+
       // Use extraction chamber for search (mock implementation)
       // In production: Call YouTube/Spotify search APIs
       const mockResults: SearchResult[] = [
-        { id: '1', title: `${query} Song 1`, artist: 'Artist 1', videoId: 'abc123', duration: 210, type: 'song' },
-        { id: '2', title: `${query} Song 2`, artist: 'Artist 2', videoId: 'def456', duration: 195, type: 'song' },
-        { id: '3', title: `${query} Album`, artist: 'Various Artists', videoId: 'ghi789', duration: 0, type: 'album' },
+        {
+          id: "1",
+          title: `${query} Song 1`,
+          artist: "Artist 1",
+          videoId: "abc123",
+          duration: 210,
+          type: "song",
+        },
+        {
+          id: "2",
+          title: `${query} Song 2`,
+          artist: "Artist 2",
+          videoId: "def456",
+          duration: 195,
+          type: "song",
+        },
+        {
+          id: "3",
+          title: `${query} Album`,
+          artist: "Various Artists",
+          videoId: "ghi789",
+          duration: 0,
+          type: "album",
+        },
       ];
-      
+
       // Cache results for 1 hour
-      await MavinCache.set(`search:${query}`, mockResults, 60 * 60 * 1000, 'L1_DEVICE');
-      
+      await MavinCache.set(
+        `search:${query}`,
+        mockResults,
+        60 * 60 * 1000,
+        "L1_DEVICE",
+      );
+
       return mockResults;
     },
     enabled: query.trim().length >= 2,
@@ -102,66 +137,75 @@ const SearchScreen = () => {
   // ============================================================================
   // HANDLE PLAY (Engine Integration)
   // ============================================================================
-  const handlePlay = useCallback((result: SearchResult) => {
-    triggerHaptic("light");
-    
-    // Dispatch play action to Mavin Engine
-    engine.dispatch({
-      type: 'PLAY',
-      trackId: result.id,
-      videoId: result.videoId,
-      position: 0,
-    });
-    
-    // Navigate to player
-    router.push('/(player)');
-    
-    // Blur input and hide keyboard
-    inputRef.current?.blur();
-    Keyboard.dismiss();
-  }, [engine, router]);
+  const handlePlay = useCallback(
+    (result: SearchResult) => {
+      triggerHaptic("light");
+
+      // Dispatch play action to Mavin Engine
+      engine.dispatch({
+        type: "PLAY",
+        trackId: result.id,
+        videoId: result.videoId,
+        position: 0,
+      });
+
+      // Navigate to player
+      router.push("/(player)");
+
+      // Blur input and hide keyboard
+      inputRef.current?.blur();
+      Keyboard.dismiss();
+    },
+    [engine, router],
+  );
 
   // ============================================================================
   // RENDER SEARCH RESULT
   // ============================================================================
-  const renderResult = useCallback(({ item }: { item: SearchResult }) => {
-    const isSong = item.type === 'song';
-    
-    return (
-      <TouchableOpacity 
-        style={styles.resultItem} 
-        onPress={() => handlePlay(item)}
-        activeOpacity={0.85}
-      >
-        <View style={styles.resultContent}>
-          <View style={styles.resultIcon}>
-            <Ionicons 
-              name={isSong ? "musical-notes" : "albums"} 
-              size={moderateScale(20)} 
-              color={Colors.text} 
-            />
-          </View>
-          
-          <View style={styles.resultInfo}>
-            <Text style={styles.resultTitle} numberOfLines={1}>
-              {item.title}
-            </Text>
-            <Text style={styles.resultSubtitle} numberOfLines={1}>
-              {isSong ? item.artist : item.type.charAt(0).toUpperCase() + item.type.slice(1)}
-            </Text>
-          </View>
-          
-          {isSong && (
-            <View style={styles.durationBadge}>
-              <Text style={styles.durationText}>
-                {Math.floor(item.duration / 60)}:{(item.duration % 60).toString().padStart(2, '0')}
+  const renderResult = useCallback(
+    ({ item }: { item: SearchResult }) => {
+      const isSong = item.type === "song";
+
+      return (
+        <TouchableOpacity
+          style={styles.resultItem}
+          onPress={() => handlePlay(item)}
+          activeOpacity={0.85}
+        >
+          <View style={styles.resultContent}>
+            <View style={styles.resultIcon}>
+              <Ionicons
+                name={isSong ? "musical-notes" : "albums"}
+                size={moderateScale(20)}
+                color={Colors.text}
+              />
+            </View>
+
+            <View style={styles.resultInfo}>
+              <Text style={styles.resultTitle} numberOfLines={1}>
+                {item.title}
+              </Text>
+              <Text style={styles.resultSubtitle} numberOfLines={1}>
+                {isSong
+                  ? item.artist
+                  : item.type.charAt(0).toUpperCase() + item.type.slice(1)}
               </Text>
             </View>
-          )}
-        </View>
-      </TouchableOpacity>
-    );
-  }, [handlePlay]);
+
+            {isSong && (
+              <View style={styles.durationBadge}>
+                <Text style={styles.durationText}>
+                  {Math.floor(item.duration / 60)}:
+                  {(item.duration % 60).toString().padStart(2, "0")}
+                </Text>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+      );
+    },
+    [handlePlay],
+  );
 
   // ============================================================================
   // UI RENDER
@@ -172,18 +216,27 @@ const SearchScreen = () => {
         <View style={styles.innerContainer}>
           {/* HEADER */}
           <View style={styles.header}>
-            <TouchableOpacity 
+            <TouchableOpacity
               onPress={() => {
                 triggerHaptic("light");
                 router.back();
               }}
               style={styles.backButton}
             >
-              <Ionicons name="arrow-back" size={moderateScale(24)} color={Colors.text} />
+              <Ionicons
+                name="arrow-back"
+                size={moderateScale(24)}
+                color={Colors.text}
+              />
             </TouchableOpacity>
-            
+
             <View style={styles.searchContainer}>
-              <Ionicons name="search" size={moderateScale(20)} color={Colors.textMuted} style={styles.searchIcon} />
+              <Ionicons
+                name="search"
+                size={moderateScale(20)}
+                color={Colors.textMuted}
+                style={styles.searchIcon}
+              />
               <TextInput
                 ref={inputRef}
                 style={styles.searchInput}
@@ -199,19 +252,23 @@ const SearchScreen = () => {
                 onSubmitEditing={() => Keyboard.dismiss()}
               />
               {query.length > 0 && (
-                <TouchableOpacity 
+                <TouchableOpacity
                   onPress={() => {
                     setQuery("");
                     inputRef.current?.focus();
                   }}
                   style={styles.clearButton}
                 >
-                  <Ionicons name="close-circle" size={moderateScale(18)} color={Colors.textMuted} />
+                  <Ionicons
+                    name="close-circle"
+                    size={moderateScale(18)}
+                    color={Colors.textMuted}
+                  />
                 </TouchableOpacity>
               )}
             </View>
-            
-            <TouchableOpacity 
+
+            <TouchableOpacity
               onPress={() => {
                 triggerHaptic("light");
                 Keyboard.dismiss();
@@ -226,12 +283,16 @@ const SearchScreen = () => {
           {/* SEARCH RESULTS */}
           {query.length === 0 && !isFocused ? (
             <View style={styles.emptyState}>
-              <Ionicons name="search" size={moderateScale(64)} color={Colors.textMuted} />
+              <Ionicons
+                name="search"
+                size={moderateScale(64)}
+                color={Colors.textMuted}
+              />
               <Text style={styles.emptyTitle}>Search your music</Text>
               <Text style={styles.emptyText}>
-                {gracePeriodStatus === 'grace_period' 
-                  ? 'Ad-free searching for 7 days' 
-                  : 'Find songs, artists, and albums'}
+                {gracePeriodStatus === "grace_period"
+                  ? "Ad-free searching for 7 days"
+                  : "Find songs, artists, and albums"}
               </Text>
             </View>
           ) : searchQuery.isLoading && query.length >= 2 ? (
@@ -251,7 +312,11 @@ const SearchScreen = () => {
             />
           ) : query.length >= 2 ? (
             <View style={styles.emptyState}>
-              <Ionicons name="albums" size={moderateScale(64)} color={Colors.textMuted} />
+              <Ionicons
+                name="albums"
+                size={moderateScale(64)}
+                color={Colors.textMuted}
+              />
               <Text style={styles.emptyTitle}>No results found</Text>
               <Text style={styles.emptyText}>Try different keywords</Text>
             </View>

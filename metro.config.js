@@ -1,8 +1,13 @@
 const { getDefaultConfig } = require("expo/metro-config");
 
-/** @type {import('expo/metro-config').MetroConfig} */
 const config = getDefaultConfig(__dirname);
 
-config.resolver.sourceExts.push("d.ts");
+// Ensure TypeScript extensions are recognized
+config.resolver.sourceExts = [
+  ...config.resolver.sourceExts,
+  "ts",
+  "tsx",
+  "d.ts"
+];
 
 module.exports = config;

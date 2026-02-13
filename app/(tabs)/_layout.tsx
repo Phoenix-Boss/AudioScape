@@ -111,7 +111,7 @@ function TabLayoutContent() {
           }}
         />
         <Tabs.Screen
-          name="player"
+          name="category"
           options={{
             href: null,
             headerShown: false,

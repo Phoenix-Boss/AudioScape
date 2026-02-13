@@ -21,7 +21,7 @@ import { useQuery } from "@tanstack/react-query";
 // ============================================================================
 import { useGracePeriod } from "@/services/mavin/monetization/GracePeriod";
 import { useAdMonetization } from "@/services/mavin/monetization/AdMonetization";
-import { useMavinEngine } from "@/services/mavin/core/Engine";
+import { useMavinEngine } from "@/services/mavin/engine/Engine";
 import { MavinCache } from "@/services/mavin/core/CacheLayer";
 
 // ============================================================================

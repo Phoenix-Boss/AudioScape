@@ -32,15 +32,15 @@ import {
 import { 
   useMavinEngine,
   type EngineAction 
-} from "@/services/mavin/core/Engine";
+} from "@/services/mavin/engine/Engine";
 import { 
   useEngagementMetrics,
   type EngagementMetrics 
-} from "@/services/mavin/engagement/EngagementEngine";
+} from "@/services/engagement/EngagementEngine";
 import { 
   useExtractionChamber,
   type ExtractionResult 
-} from "@/services/mavin/extraction/useExtractionChamber";
+} from "@/services/mavin/extraction/Chamber";
 import { MavinCache } from "@/services/mavin/core/CacheLayer";
 import { errorFromUnknown, logError } from "@/services/mavin/core/errors";
 

@@ -61,7 +61,7 @@ import { ScaledSheet } from "react-native-size-matters/extend";
 // ============================================================================
 // MAVIN ENGINE INTEGRATIONS
 // ============================================================================
-import { useMavinEngine } from "@/services/mavin/core/Engine";
+import { useMavinEngine } from "@/services/mavin/engine/Engine";
 import { 
   useAudioDSP,
   useEQSettings,

@@ -1,403 +1,308 @@
 /**
  * MAVIN GRACE PERIOD MANAGER
- * 
- * 7-day ad-free period tracking + Pro trial management
- * 
- * ARCHITECTURE:
- * • TanStack Query for premium status (server-validated)
- * • Zod validation for ALL premium states
- * • Device fingerprint generation (SHA-256 hash)
- * • Grace period calculation (install_timestamp + 7 days)
- * • Pro trial flow (card-on-file, auto-bill after 7 days)
- * • Offline-capable status checking (cached premium state)
- * 
- * ETHICAL GUARANTEES:
- * ✅ Zero tracking during grace period (no ads, no analytics)
- * ✅ Clear expiration messaging ("Free trial ends in 2 days")
- * ✅ Easy cancellation (one tap in settings)
- * ✅ No hidden charges (explicit consent before billing)
- * ✅ Grace period respected globally (no regional bias)
+ * Using expo-secure-store for encrypted persistence
  */
 
-import { useQuery, QueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import * as Crypto from 'expo-crypto';
 import * as Application from 'expo-application';
-import { errorFromUnknown, logError } from '../core/errors';
+import * as React from 'react';
+import { Platform } from 'react-native';
+import { SecureStorage } from '../../storage/SecureStore';
 
 // ============================================================================
 // ZOD VALIDATION SCHEMAS
 // ============================================================================
 
-// Premium status schema
 const PremiumStatusSchema = z.object({
   status: z.enum([
-    'free',           // Never had trial
-    'grace_period',   // 7-day ad-free period active
-    'trial_active',   // Pro trial active (card on file)
-    'premium',        // Paid subscriber
-    'expired',        // Trial/subscription expired
-    'cancelled'       // User cancelled subscription
+    'free', 'grace_period', 'trial_active', 'premium', 'expired', 'cancelled'
   ]),
-  installTimestamp: z.number(), // First app open timestamp
-  gracePeriodEnd: z.number(),   // installTimestamp + 7 days
+  installTimestamp: z.number(),
+  gracePeriodEnd: z.number(),
   trialStartedAt: z.number().optional(),
   trialEndedAt: z.number().optional(),
   premiumUntil: z.number().optional(),
-  deviceFingerprint: z.string().min(64), // SHA-256 hash
+  deviceFingerprint: z.string().min(64),
   email: z.string().email().optional(),
   isTrialConversion: z.boolean().default(false),
   lastChecked: z.number().default(Date.now()),
 });
 
-// Trial start request schema
-const TrialStartRequestSchema = z.object({
-  deviceFingerprint: z.string().min(64),
-  email: z.string().email(),
-  cardToken: z.string().min(10), // Tokenized card (Stripe/Paystack)
-  installTimestamp: z.number(),
-});
-
 export type PremiumStatus = z.infer<typeof PremiumStatusSchema>;
-export type TrialStartRequest = z.infer<typeof TrialStartRequestSchema>;
-export type GracePeriodStatus = PremiumStatus['status'];
 
 // ============================================================================
-// GRACE PERIOD MANAGER CLASS
+// GRACE PERIOD MANAGER
 // ============================================================================
 
 class GracePeriodManager {
-  private static instance: GracePeriodManager | null = null;
-  private queryClient: QueryClient;
+  private static instance: GracePeriodManager;
   private deviceFingerprint: string | null = null;
+  private readonly STORAGE_KEY = 'premium_status';
+  private readonly FINGERPRINT_KEY = 'device_fingerprint';
 
-  private constructor(queryClient: QueryClient) {
-    this.queryClient = queryClient;
-    console.log('[Mavin GracePeriod] Manager initialized');
-  }
+  private constructor() {}
 
-  static getInstance(queryClient: QueryClient): GracePeriodManager {
+  static getInstance(): GracePeriodManager {
     if (!GracePeriodManager.instance) {
-      GracePeriodManager.instance = new GracePeriodManager(queryClient);
+      GracePeriodManager.instance = new GracePeriodManager();
     }
     return GracePeriodManager.instance;
   }
 
   /**
-   * Initialize grace period manager (generate device fingerprint)
+   * Initialize - call once at app startup
    */
   async initialize(): Promise<void> {
-    // Generate device fingerprint if not exists
-    if (!this.deviceFingerprint) {
-      this.deviceFingerprint = await this.generateDeviceFingerprint();
-      console.log('[Mavin GracePeriod] Device fingerprint generated');
-    }
-    
-    // Initialize premium status if not exists
-    const existingStatus = this.queryClient.getQueryData<PremiumStatus>(['premium_status']);
-    if (!existingStatus) {
-      await this.initializePremiumStatus();
+    try {
+      // Load or generate fingerprint
+      this.deviceFingerprint = await SecureStorage.getItem<string>(this.FINGERPRINT_KEY);
+      
+      if (!this.deviceFingerprint) {
+        this.deviceFingerprint = await this.generateDeviceFingerprint();
+        await SecureStorage.setItem(this.FINGERPRINT_KEY, this.deviceFingerprint);
+      }
+
+      // Check if first launch
+      const existing = await SecureStorage.getItem<PremiumStatus>(this.STORAGE_KEY);
+      if (!existing) {
+        await this.initializePremiumStatus();
+      }
+
+      console.log('[GracePeriod] Initialized');
+    } catch (error) {
+      console.error('[GracePeriod] Init failed:', error);
     }
   }
 
   /**
-   * Generate device fingerprint (SHA-256 hash of device characteristics)
+   * Get current premium status
    */
+  async getPremiumStatus(): Promise<PremiumStatus> {
+    try {
+      // Try to get from secure storage
+      const stored = await SecureStorage.getItem<PremiumStatus>(this.STORAGE_KEY);
+      
+      if (stored) {
+        // Validate
+        const validated = PremiumStatusSchema.parse(stored);
+        
+        // Check if grace period expired
+        if (validated.status === 'grace_period' && Date.now() > validated.gracePeriodEnd) {
+          const expired: PremiumStatus = {
+            ...validated,
+            status: 'free',
+            lastChecked: Date.now()
+          };
+          await SecureStorage.setItem(this.STORAGE_KEY, expired);
+          return expired;
+        }
+        
+        return validated;
+      }
+
+      // First launch - create new
+      return this.initializePremiumStatus();
+    } catch (error) {
+      console.error('[GracePeriod] Get failed:', error);
+      
+      // Emergency fallback
+      return {
+        status: 'free',
+        installTimestamp: Date.now(),
+        gracePeriodEnd: Date.now() + 7 * 24 * 60 * 60 * 1000,
+        deviceFingerprint: this.deviceFingerprint || 'unknown',
+        lastChecked: Date.now()
+      };
+    }
+  }
+
+  /**
+   * Start trial
+   */
+  async startTrial(email: string, cardToken: string): Promise<PremiumStatus> {
+    try {
+      // Call your API
+      const response = await fetch('https://api.mavin.app/premium/start-trial', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          device_fingerprint: this.deviceFingerprint,
+          email,
+          card_token: cardToken
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      const status = PremiumStatusSchema.parse({
+        ...data,
+        deviceFingerprint: this.deviceFingerprint,
+        lastChecked: Date.now()
+      });
+
+      // Save securely
+      await SecureStorage.setItem(this.STORAGE_KEY, status);
+      
+      return status;
+    } catch (error) {
+      console.error('[GracePeriod] Start trial failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Cancel subscription
+   */
+  async cancelSubscription(): Promise<PremiumStatus> {
+    try {
+      const response = await fetch('https://api.mavin.app/premium/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          device_fingerprint: this.deviceFingerprint
+        })
+      });
+
+      const data = await response.json();
+      const status = PremiumStatusSchema.parse({
+        ...data,
+        deviceFingerprint: this.deviceFingerprint,
+        lastChecked: Date.now()
+      });
+
+      await SecureStorage.setItem(this.STORAGE_KEY, status);
+      return status;
+    } catch (error) {
+      console.error('[GracePeriod] Cancel failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clear all data (for testing/logout)
+   */
+  async clearAllData(): Promise<void> {
+    await SecureStorage.removeItem(this.STORAGE_KEY);
+    await SecureStorage.removeItem(this.FINGERPRINT_KEY);
+    this.deviceFingerprint = null;
+  }
+
+  /**
+   * Get days remaining
+   */
+  getDaysRemaining(status: PremiumStatus): number {
+    if (status.status === 'grace_period') {
+      return Math.max(0, Math.ceil((status.gracePeriodEnd - Date.now()) / (24 * 60 * 60 * 1000)));
+    }
+    if (status.status === 'trial_active' && status.trialEndedAt) {
+      return Math.max(0, Math.ceil((status.trialEndedAt - Date.now()) / (24 * 60 * 60 * 1000)));
+    }
+    if (status.status === 'premium' && status.premiumUntil) {
+      return Math.max(0, Math.ceil((status.premiumUntil - Date.now()) / (24 * 60 * 60 * 1000)));
+    }
+    return 0;
+  }
+
+  // Private methods
   private async generateDeviceFingerprint(): Promise<string> {
     try {
-      // Gather device characteristics
-      const deviceId = Application.androidId || Application.applicationId || 'unknown_device';
-      const installTime = Application.installationTime || Date.now().toString();
-      const bundleId = Application.applicationId || 'com.mavin.music';
+      let deviceId = 'unknown';
+      if (Platform.OS === 'android') {
+        deviceId = (await Application.androidId) || 'android';
+      } else {
+        deviceId = Application.applicationId || 'ios';
+      }
       
-      // Create fingerprint string
-      const fingerprintString = `${deviceId}:${installTime}:${bundleId}:${Date.now()}`;
+      const fingerprint = `${deviceId}:${Date.now()}:${Math.random()}`;
       
-      // Generate SHA-256 hash
       const hash = await Crypto.digestStringAsync(
         Crypto.CryptoDigestAlgorithm.SHA256,
-        fingerprintString
+        fingerprint
       );
       
       return hash.toLowerCase();
-    } catch (error) {
-      const mavinError = errorFromUnknown(error);
-      logError(mavinError, 'warn');
-      
-      // Fallback: Generate random fingerprint
-      return 'fallback_' + Math.random().toString(36).substring(2, 15);
+    } catch {
+      // Fallback
+      return `fp_${Date.now()}_${Math.random().toString(36)}`;
     }
   }
 
-  /**
-   * Initialize premium status (first app open)
-   */
-  private async initializePremiumStatus(): Promise<void> {
+  private async initializePremiumStatus(): Promise<PremiumStatus> {
     const installTimestamp = Date.now();
-    const gracePeriodEnd = installTimestamp + 7 * 24 * 60 * 60 * 1000; // 7 days
+    const gracePeriodEnd = installTimestamp + 7 * 24 * 60 * 60 * 1000;
     
     const status: PremiumStatus = {
       status: 'grace_period',
       installTimestamp,
       gracePeriodEnd,
       deviceFingerprint: this.deviceFingerprint || 'unknown',
-      lastChecked: Date.now(),
+      lastChecked: Date.now()
     };
-    
-    // Save to cache
-    this.queryClient.setQueryData(['premium_status'], status);
-    
-    // Persist to AsyncStorage (for offline access)
-    try {
-      await MavinCache.set('premium_status', status, 30 * 24 * 60 * 60 * 1000, 'DEVICE'); // 30 days
-    } catch (error) {
-      logError(errorFromUnknown(error), 'warn');
-    }
-    
-    console.log('[Mavin GracePeriod] Premium status initialized (grace period active until', new Date(gracePeriodEnd).toLocaleDateString(), ')');
-  }
 
-  /**
-   * Get current premium status (server-validated)
-   */
-  async getPremiumStatus(): Promise<PremiumStatus> {
-    // Check cache first
-    const cached = this.queryClient.getQueryData<PremiumStatus>(['premium_status']);
-    if (cached && PremiumStatusSchema.safeParse(cached).success) {
-      // Check if grace period expired
-      if (cached.status === 'grace_period' && Date.now() > cached.gracePeriodEnd) {
-        // Transition to free status
-        const newStatus: PremiumStatus = {
-          ...cached,
-          status: 'free',
-          lastChecked: Date.now(),
-        };
-        
-        this.queryClient.setQueryData(['premium_status'], newStatus);
-        return newStatus;
-      }
-      
-      return cached;
-    }
-    
-    // Fetch from server (in production: Call Supabase RPC)
-    try {
-      if (!this.deviceFingerprint) {
-        throw new Error('Device fingerprint not available');
-      }
-      
-      const response = await fetch('/api/premium/status', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_fingerprint: this.deviceFingerprint }),
-      });
-      
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      
-      const data = await response.json();
-      const status = PremiumStatusSchema.parse(data);
-      
-      // Cache the status
-      this.queryClient.setQueryData(['premium_status'], status);
-      
-      return status;
-    } catch (error) {
-      const mavinError = errorFromUnknown(error);
-      logError(mavinError, 'warn');
-      
-      // Return cached status or default
-      if (cached) return cached;
-      
-      // Return default free status
-      return PremiumStatusSchema.parse({
-        status: 'free',
-        installTimestamp: Date.now() - 30 * 24 * 60 * 60 * 1000, // 30 days ago
-        gracePeriodEnd: Date.now() - 23 * 24 * 60 * 60 * 1000, // 23 days ago (grace period expired)
-        deviceFingerprint: this.deviceFingerprint || 'unknown',
-        lastChecked: Date.now(),
-      });
-    }
-  }
-
-  /**
-   * Start Pro trial (7 days free with card on file)
-   */
-  async startTrial(email: string, cardToken: string): Promise<PremiumStatus> {
-    if (!this.deviceFingerprint) {
-      throw new Error('Device fingerprint not available');
-    }
-    
-    try {
-      // Validate request
-      const request = TrialStartRequestSchema.parse({
-        deviceFingerprint: this.deviceFingerprint,
-        email,
-        cardToken,
-        installTimestamp: Date.now(),
-      });
-      
-      // Call server to start trial
-      const response = await fetch('/api/premium/start-trial', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      });
-      
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      
-      const data = await response.json();
-      const status = PremiumStatusSchema.parse(data);
-      
-      // Update cache
-      this.queryClient.setQueryData(['premium_status'], status);
-      
-      console.log('[Mavin GracePeriod] Pro trial started (ends', new Date(status.trialEndedAt || 0).toLocaleDateString(), ')');
-      return status;
-    } catch (error) {
-      const mavinError = errorFromUnknown(error);
-      logError(mavinError, 'error');
-      throw mavinError;
-    }
-  }
-
-  /**
-   * Cancel subscription/trial
-   */
-  async cancelSubscription(): Promise<PremiumStatus> {
-    if (!this.deviceFingerprint) {
-      throw new Error('Device fingerprint not available');
-    }
-    
-    try {
-      const response = await fetch('/api/premium/cancel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_fingerprint: this.deviceFingerprint }),
-      });
-      
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      
-      const data = await response.json();
-      const status = PremiumStatusSchema.parse(data);
-      
-      // Update cache
-      this.queryClient.setQueryData(['premium_status'], status);
-      
-      console.log('[Mavin GracePeriod] Subscription cancelled');
-      return status;
-    } catch (error) {
-      const mavinError = errorFromUnknown(error);
-      logError(mavinError, 'error');
-      throw mavinError;
-    }
-  }
-
-  /**
-   * Get days remaining in grace period/trial
-   */
-  getDaysRemaining(status: PremiumStatus): number {
-    if (status.status === 'grace_period') {
-      return Math.max(0, Math.ceil((status.gracePeriodEnd - Date.now()) / (24 * 60 * 60 * 1000)));
-    }
-    
-    if (status.status === 'trial_active' && status.trialEndedAt) {
-      return Math.max(0, Math.ceil((status.trialEndedAt - Date.now()) / (24 * 60 * 60 * 1000)));
-    }
-    
-    return 0;
-  }
-
-  /**
-   * Get device fingerprint
-   */
-  getDeviceFingerprint(): string | null {
-    return this.deviceFingerprint;
+    await SecureStorage.setItem(this.STORAGE_KEY, status);
+    return status;
   }
 }
 
 // ============================================================================
-// REACT HOOK FOR UI INTEGRATION
+// REACT HOOK
 // ============================================================================
 
-/**
- * Hook for grace period and premium status
- */
 export const useGracePeriod = () => {
-  const queryClient = useQueryClient();
-  const manager = GracePeriodManager.getInstance(queryClient);
-  
-  // Initialize on mount
+  const [isInitialized, setIsInitialized] = React.useState(false);
+  const manager = React.useMemo(() => GracePeriodManager.getInstance(), []);
+
   React.useEffect(() => {
-    manager.initialize().catch(error => {
-      logError(errorFromUnknown(error), 'error');
-    });
+    manager.initialize().then(() => setIsInitialized(true));
   }, [manager]);
-  
-  // Query premium status
-  const {  premiumStatus, isLoading, error, refetch } = useQuery<PremiumStatus>({
+
+  const { data: status, isLoading, refetch } = useQuery({
     queryKey: ['premium_status'],
     queryFn: () => manager.getPremiumStatus(),
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    enabled: isInitialized,
+    staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
-    refetchOnReconnect: true,
-    initialData: () => {
-      // Return cached status or default
-      const cached = queryClient.getQueryData<PremiumStatus>(['premium_status']);
-      if (cached) return cached;
-      
-      return PremiumStatusSchema.parse({
-        status: 'free',
-        installTimestamp: Date.now() - 30 * 24 * 60 * 60 * 1000,
-        gracePeriodEnd: Date.now() - 23 * 24 * 60 * 60 * 1000,
-        deviceFingerprint: manager.getDeviceFingerprint() || 'unknown',
-        lastChecked: Date.now(),
-      });
-    },
   });
-  
-  // Start trial mutation
+
   const startTrial = React.useCallback(async (email: string, cardToken: string) => {
-    const status = await manager.startTrial(email, cardToken);
-    queryClient.setQueryData(['premium_status'], status);
-    return status;
-  }, [manager, queryClient]);
-  
-  // Cancel subscription mutation
+    const result = await manager.startTrial(email, cardToken);
+    refetch();
+    return result;
+  }, [manager, refetch]);
+
   const cancelSubscription = React.useCallback(async () => {
-    const status = await manager.cancelSubscription();
-    queryClient.setQueryData(['premium_status'], status);
-    return status;
-  }, [manager, queryClient]);
-  
-  // Get days remaining
-  const daysRemaining = premiumStatus ? manager.getDaysRemaining(premiumStatus) : 0;
-  
+    const result = await manager.cancelSubscription();
+    refetch();
+    return result;
+  }, [manager, refetch]);
+
+  const clearAllData = React.useCallback(async () => {
+    await manager.clearAllData();
+    refetch();
+  }, [manager, refetch]);
+
+  const daysRemaining = status ? manager.getDaysRemaining(status) : 0;
+
   return {
-    // Status
-    premiumStatus,
-    gracePeriodStatus: premiumStatus?.status || 'free',
-    isLoading,
-    error,
-    
-    // Days remaining
+    status,
+    gracePeriodStatus: status?.status || 'free',
+    isLoading: isLoading || !isInitialized,
     daysRemaining,
-    isGracePeriodActive: premiumStatus?.status === 'grace_period' && daysRemaining > 0,
-    isTrialActive: premiumStatus?.status === 'trial_active',
-    isPremium: premiumStatus?.status === 'premium',
-    
-    // Device info
-    deviceFingerprint: manager.getDeviceFingerprint(),
-    
-    // Actions
+    isGracePeriodActive: status?.status === 'grace_period' && daysRemaining > 0,
+    isTrialActive: status?.status === 'trial_active',
+    isPremium: status?.status === 'premium',
+    isFree: status?.status === 'free',
+    deviceFingerprint: manager['deviceFingerprint'],
     startTrial,
     cancelSubscription,
-    refetchPremiumStatus: refetch,
+    clearAllData,
+    refresh: refetch
   };
 };
 
-// ============================================================================
-// EXPORTS
-// ============================================================================
-
-export { GracePeriodManager, useGracePeriod };
-export type { PremiumStatus, TrialStartRequest, GracePeriodStatus };
+export { GracePeriodManager };
