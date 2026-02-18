@@ -1,301 +1,118 @@
-/**
- * This file defines the `QueueModal` component, a modal screen that displays
- * the current playback queue of songs. Users can view the order of upcoming tracks,
- * see the currently playing song, and jump to any song in the queue.
- */
+// app/(modals)/queue.tsx
 
-import VerticalDismiss from "@/components/navigation/VerticalArrowDismiss";
-import { Colors } from "@/constants/Colors";
-import { unknownTrackImageUri } from "@/constants/images";
-import { triggerHaptic } from "@/helpers/haptics";
-import { Image } from "@d11/react-native-fast-image";
-import { Entypo } from "@expo/vector-icons";
-import { FlashList } from "@shopify/flash-list";
-import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
-import { Text, TouchableOpacity, View } from "react-native";
-import LoaderKit from "react-native-loader-kit";
-import { Divider } from "react-native-paper";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ScaledSheet, moderateScale } from "react-native-size-matters/extend";
+import { useEffect, useState } from "react";
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  StyleSheet,
+} from "react-native";
 import TrackPlayer, {
-  Event,
   Track,
   useActiveTrack,
-  useTrackPlayerEvents,
 } from "react-native-track-player";
+import { Image } from "expo-image";
 
-/**
- * `QueueModal` component.
- * Displays the current music playback queue.
- * @returns The rendered queue modal component.
- */
 export default function QueueModal() {
   const [queue, setQueue] = useState<Track[]>([]);
-  const [activeIndex, setActiveIndex] = useState<number>(0);
-  const [isScrolling, setIsScrolling] = useState<boolean>(false);
   const activeTrack = useActiveTrack();
-  const router = useRouter();
-  const { bottom } = useSafeAreaInsets();
-  const activeTrackId = activeTrack?.id;
 
-  /**
-   * Fetches the current queue and active track index from TrackPlayer.
-   * @returns A promise that resolves when the queue is fetched.
-   */
-  const fetchQueue = useCallback(async () => {
-    const currentQueue = await TrackPlayer.getQueue();
-    setQueue(currentQueue);
-    const activeIndex = await TrackPlayer.getActiveTrackIndex();
+  useEffect(() => {
+    const loadQueue = async () => {
+      const tracks = await TrackPlayer.getQueue();
+      setQueue(tracks);
+    };
 
-    if (activeIndex !== undefined && activeIndex !== null)
-      setActiveIndex(activeIndex);
-    else setActiveIndex(0);
+    loadQueue();
   }, []);
 
-  // Fetch queue on component mount.
-  useEffect(() => {
-    fetchQueue();
-  }, [fetchQueue]);
+  const renderItem = ({ item, index }: { item: Track; index: number }) => {
+    const isActive = activeTrack?.id === item.id;
 
-  // Set up polling to check for queue changes periodically.
-  useEffect(() => {
-    const intervalId = setInterval(fetchQueue, 2000); // Check every 2 seconds.
-
-    // Clean up interval on component unmount.
-    return () => clearInterval(intervalId);
-  }, [fetchQueue]);
-
-  // Listen for TrackPlayer events to update the queue in real-time.
-  useTrackPlayerEvents(
-    [Event.PlaybackQueueEnded, Event.PlaybackActiveTrackChanged],
-    fetchQueue,
-  );
-
-  /**
-   * Handles selecting a song from the queue, skipping to that song.
-   * @param song - The selected song from the queue.
-   */
-  const handleSongSelect = useCallback(
-    async (song: Track) => {
-      triggerHaptic();
-      await TrackPlayer.skip(queue.indexOf(song));
-    },
-    [queue],
-  );
-
-  /**
-   * Renders an individual song item in the FlashList.
-   * @param item - The song item to render.
-   * @param index - Its index in the queue.
-   * @returns A View component representing a song in the queue.
-   */
-  const renderSongItem = useCallback(
-    ({ item, index }: { item: Track; index: number }) => (
-      <View
-        key={item.id}
-        style={[
-          styles.songItem,
-          activeTrackId === item.id && styles.activeSongItem, // Highlight active song.
-        ]}
+    return (
+      <TouchableOpacity
+        style={[styles.itemContainer, isActive && styles.activeItem]}
+        onPress={async () => {
+          await TrackPlayer.skip(index);
+          await TrackPlayer.play();
+        }}
       >
-        <TouchableOpacity
-          style={styles.songItemTouchableArea}
-          onPress={() => handleSongSelect(item)}
-        >
-          {/* Song index in the queue */}
-          <View style={styles.indexContainer}>
-            <Text style={styles.indexText}>{index + 1}</Text>
-          </View>
-          {/* Song artwork */}
-          <FastImage
-            source={{ uri: item.artwork ?? unknownTrackImageUri }}
-            style={styles.thumbnail}
-          />
-          {/* Playing indicator for the active track */}
-          {activeTrack?.id === item.id && (
-            <LoaderKit
-              style={styles.trackPlayingIconIndicator}
-              name="LineScalePulseOutRapid"
-              color={"white"}
-            />
-          )}
-          {/* Song title and artist */}
-          <View style={styles.songText}>
-            <Text style={styles.songTitle} numberOfLines={1}>
-              {item.title}
-            </Text>
-            <Text style={styles.songArtist} numberOfLines={1}>
-              {item.artist}
-            </Text>
-          </View>
+        <Image
+          source={{ uri: item.artwork as string }}
+          style={styles.artwork}
+          contentFit="cover"
+          transition={200}
+        />
 
-          {/* Options menu button for the song */}
-          <TouchableOpacity
-            onPress={() => {
-              triggerHaptic();
-              // Prepare song data for the menu modal.
-              const songData = JSON.stringify({
-                id: item.id,
-                title: item.title,
-                artist: item.artist,
-                thumbnail: item.artwork ?? unknownTrackImageUri,
-              });
-
-              // Navigate to the menu modal with song details.
-              router.push({
-                pathname: "/(modals)/menu",
-                params: { songData: songData, type: "queueSong" },
-              });
-            }}
-            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-          >
-            <Entypo
-              name="dots-three-vertical"
-              size={moderateScale(15)}
-              color="white"
-            />
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </View>
-    ),
-    [activeTrack, activeTrackId, handleSongSelect, router],
-  );
+        <View style={styles.textContainer}>
+          <Text style={styles.title} numberOfLines={1}>
+            {item.title}
+          </Text>
+          <Text style={styles.artist} numberOfLines={1}>
+            {item.artist}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   return (
-    <VerticalDismiss>
-      {(handleDismiss) => (
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.header}>
-              {/* Dismiss button */}
-              <Entypo
-                name="chevron-down"
-                size={moderateScale(28)}
-                style={styles.dismissButton}
-                activeOpacity={0.7}
-                color={Colors.text}
-                onPress={handleDismiss}
-              />
-              {/* Modal title showing current song index and total queue length */}
-              <Text style={styles.modalTitle}>
-                Queue ({activeIndex + 1}/{queue.length})
-              </Text>
-            </View>
+    <View style={styles.container}>
+      <Text style={styles.header}>Up Next</Text>
 
-            {/* Divider that appears when scrolling */}
-            {isScrolling && (
-              <Divider
-                style={{
-                  backgroundColor: "rgba(255,255,255,0.3)",
-                  height: 0.3,
-                }}
-              />
-            )}
-
-            {/* FlashList to display the song queue */}
-            <View style={{ flex: 1 }}>
-              <FlashList
-                data={queue}
-                keyExtractor={(item) => item.id}
-                renderItem={renderSongItem}
-                extraData={activeTrackId}
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={{
-                  paddingBottom: bottom + 10,
-                }}
-                onScroll={(e) => {
-                  const currentScrollPosition =
-                    Math.floor(e.nativeEvent.contentOffset.y) || 0;
-                  setIsScrolling(currentScrollPosition > 5);
-                }}
-                scrollEventThrottle={16}
-              />
-            </View>
-          </View>
-        </View>
-      )}
-    </VerticalDismiss>
+      <FlatList
+        data={queue}
+        keyExtractor={(item, index) =>
+          item.id ? item.id.toString() : index.toString()
+        }
+        renderItem={renderItem}
+        contentContainerStyle={{ paddingBottom: 40 }}
+      />
+    </View>
   );
 }
 
-// Styles for the QueueModal component.
-const styles = ScaledSheet.create({
-  modalOverlay: {
+const styles = StyleSheet.create({
+  container: {
     flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(0, 0, 0, 0)",
-  },
-  modalContent: {
-    backgroundColor: "#101010",
-    borderTopLeftRadius: "25@ms",
-    borderTopRightRadius: "25@ms",
-    paddingTop: 15,
-    maxHeight: "60%",
-    flex: 1,
+    backgroundColor: "#000",
+    padding: 20,
   },
   header: {
-    flexDirection: "row",
-    justifyContent: "flex-start",
-    alignItems: "center",
-    paddingLeft: 20,
+    fontSize: 20,
+    fontWeight: "600",
+    color: "#fff",
+    marginBottom: 20,
   },
-  dismissButton: {
-    marginTop: -11,
-  },
-  modalTitle: {
-    fontSize: "18@ms",
-    fontWeight: "bold",
-    color: Colors.text,
-    marginBottom: 10,
-    marginLeft: 10,
-  },
-  songItem: {
+  itemContainer: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: "10@ms",
-    paddingHorizontal: 5,
-    marginHorizontal: 5,
+    marginBottom: 16,
+    padding: 10,
+    borderRadius: 12,
   },
-  activeSongItem: {
-    backgroundColor: "rgba(255, 255, 255, 0.045)", // Subtle highlight for active track.
-    borderRadius: 16,
+  activeItem: {
+    backgroundColor: "#1e1e1e",
   },
-  songItemTouchableArea: {
-    flexDirection: "row",
-    alignItems: "center",
+  artwork: {
+    width: 60,
+    height: 60,
+    borderRadius: 10,
+    backgroundColor: "#222",
   },
-  indexContainer: {
-    width: "40@ms",
-    alignItems: "center",
-  },
-  indexText: {
-    color: "#888",
-    fontSize: "18@ms",
-    fontWeight: "bold",
-  },
-  thumbnail: {
-    width: "50@ms",
-    height: "50@ms",
-    borderRadius: 8,
-    marginRight: 15,
-  },
-  trackPlayingIconIndicator: {
-    position: "absolute",
-    top: "15@ms",
-    left: "56@ms",
-    width: "20@ms",
-    height: "20@ms",
-  },
-  songText: {
+  textContainer: {
+    marginLeft: 14,
     flex: 1,
   },
-  songTitle: {
-    color: Colors.text,
-    fontSize: "16@ms",
+  title: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
   },
-  songArtist: {
-    color: Colors.textMuted,
-    fontSize: "14@ms",
+  artist: {
+    color: "#aaa",
+    fontSize: 14,
+    marginTop: 4,
   },
 });

@@ -37,3 +37,6 @@ build*.ps1
 
 # typescript
 *.tsbuildinfo
+
+# Jest cache
+.jest-cache/

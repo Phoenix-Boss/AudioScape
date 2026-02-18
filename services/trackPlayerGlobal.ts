@@ -3,7 +3,6 @@ import TrackPlayer, {
   AppKilledPlaybackBehavior,
   Capability,
   RepeatMode,
-  Event,
 } from "react-native-track-player";
 
 // Global state
@@ -83,14 +82,7 @@ export async function initializeTrackPlayer(): Promise<boolean> {
       await TrackPlayer.setVolume(1);
       await TrackPlayer.setRepeatMode(RepeatMode.Off);
 
-      // Set up event listeners for better state management
-      TrackPlayer.addEventListener(Event.PlaybackQueueEnded, () => {
-        console.log('[TrackPlayer] Queue ended');
-      });
-
-      TrackPlayer.addEventListener(Event.PlaybackError, (error) => {
-        console.error('[TrackPlayer] Playback error:', error);
-      });
+      // REMOVED: Event listeners are now in the playback service only
 
       isInitialized = true;
       console.log('[TrackPlayer] Global initialization completed successfully');

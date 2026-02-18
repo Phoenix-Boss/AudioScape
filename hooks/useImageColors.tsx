@@ -1,7 +1,10 @@
 /**
- * This file contains a custom React hook for extracting prominent colors from an image.
- * It uses the `react-native-image-colors` library to analyze an image from a given URI (URL or local file path) and
- * provides the extracted color palette.
+ * Custom hook for extracting prominent colors from an image.
+ * Handles:
+ * - Remote URLs
+ * - Local file URIs
+ * - Null / undefined values safely
+ * - Base64 conversion errors
  */
 
 import { Colors } from "@/constants/Colors";
@@ -12,15 +15,12 @@ import { AndroidImageColors } from "react-native-image-colors/build/types";
 
 /**
  * Converts a local image file to a Base64 encoded string.
- * This is necessary for the `react-native-image-colors` library to process local files.
- * It dynamically determines the image type from the file extension.
- *
- * @param imageUri The local URI of the image file (e.g., 'file:///...').
- * @returns A Base64 encoded string with the appropriate data URI scheme, or null on error.
  */
 const convertImageToBase64 = async (imageUri: string) => {
   try {
-    let extension = imageUri.split(".").pop()?.toLowerCase() || "jpeg";
+    const extensionMatch = imageUri.split(".").pop()?.toLowerCase();
+    let extension = extensionMatch || "jpeg";
+
     if (extension === "jpg") {
       extension = "jpeg";
     }
@@ -28,6 +28,7 @@ const convertImageToBase64 = async (imageUri: string) => {
     const base64code = await FileSystem.readAsStringAsync(imageUri, {
       encoding: FileSystem.EncodingType.Base64,
     });
+
     return `data:image/${extension};base64,${base64code}`;
   } catch (error) {
     console.error("Error converting image to Base64:", error);
@@ -36,37 +37,54 @@ const convertImageToBase64 = async (imageUri: string) => {
 };
 
 /**
- * A custom hook that extracts prominent colors from a given image URI.
- * It can handle both remote URLs and local file URIs.
- * It fetches and caches the colors, providing a fallback color if the process fails.
- * @param imageUrl The URI of the image from which to extract colors (can be a remote URL or a local file URI).
- * @returns An object containing the extracted `imageColors` (or null if not yet available),
- * which conforms to the `AndroidImageColors` type.
+ * Hook: useImageColors
  */
-export const useImageColors = (imageUrl: string) => {
-  // State to store the extracted image colors.
-  const [imageColors, setImageColors] = useState<AndroidImageColors | null>(
-    null,
-  );
+export const useImageColors = (imageUrl?: string | null) => {
+  const [imageColors, setImageColors] =
+    useState<AndroidImageColors | null>(null);
 
   useEffect(() => {
     const fetchColors = async () => {
-      // When the imageUrl changes, get the colors from the image.
-      const source = imageUrl.startsWith("file:///")
-        ? await convertImageToBase64(imageUrl)
-        : imageUrl;
-      getColors(source as string, {
-        fallback: Colors.background, // Fallback color if extraction fails.
-        cache: true, // Enable caching to avoid re-processing the same image.
-        key: imageUrl, // Unique key for caching.
-      })
-        .then((colors) => setImageColors(colors as AndroidImageColors))
-        .catch((error) => {
-          console.error("Failed to get image colors:", error);
+      try {
+        // 🛑 SAFETY GUARD 1 — Null or undefined
+        if (!imageUrl || typeof imageUrl !== "string") {
+          setImageColors(null);
+          return;
+        }
+
+        // 🛑 SAFETY GUARD 2 — Empty string
+        if (imageUrl.trim().length === 0) {
+          setImageColors(null);
+          return;
+        }
+
+        let source: string | null = imageUrl;
+
+        // Handle local files
+        if (imageUrl.startsWith("file:///")) {
+          source = await convertImageToBase64(imageUrl);
+
+          if (!source) {
+            setImageColors(null);
+            return;
+          }
+        }
+
+        const colors = await getColors(source, {
+          fallback: Colors.background,
+          cache: true,
+          key: imageUrl,
         });
+
+        setImageColors(colors as AndroidImageColors);
+      } catch (error) {
+        console.error("Failed to get image colors:", error);
+        setImageColors(null);
+      }
     };
+
     fetchColors();
-  }, [imageUrl]); // Re-run the effect if the imageUrl changes.
+  }, [imageUrl]);
 
   return { imageColors };
 };

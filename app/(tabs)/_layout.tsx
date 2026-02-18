@@ -12,21 +12,9 @@ import { triggerHaptic } from "@/helpers/haptics";
 import { useGlobalUIState } from "@/contexts/GlobalUIStateContext";
 
 const COLORS = {
-  goldPrimary: "#D4AF37",
-  goldShiny: "#FFD700",
-  goldRich: "#BF9B30",
   goldShimmer: "#E6C16A",
-  goldBronze: "#8C6F0E",
-  goldMuted: "#C9A96A",
-  text: "#FFFFFF",
-  textSecondary: "#B3B3B3",
-  textTertiary: "#808080",
   background: "#000000",
-  surface: "#121212",
-  surfaceLight: "#1F1F1F",
   surfaceDark: "#0A0A0A",
-  border: "#333333",
-  white: "#FFFFFF",
 };
 
 const TAB_HEIGHT = 56;
@@ -36,10 +24,7 @@ function TabLayoutContent() {
   const router = useRouter();
   const segments = useSegments();
   
-  const {
-    resetNavigationState,
-  } = useGlobalUIState();
-
+  const { resetNavigationState } = useGlobalUIState();
   const lastSegment = useRef(segments.join("/"));
 
   useEffect(() => {
@@ -55,100 +40,53 @@ function TabLayoutContent() {
     router.push(`/(tabs)/${tabName}`);
   };
 
-  // Check if we're on the player screen
-  const isPlayerScreen = segments[0] === '(player)';
-  
+  const isPlayerScreen = segments[0] === "(player)";
+
+  // Only include actual tabs you want visible
   const tabs = [
-    { name: "index", title: "Home", icon: "home", iconOutline: "home-outline" },
-    { name: "search", title: "Search", icon: "search", iconOutline: "search-outline" },
-    { name: "library", title: "Library", icon: "albums", iconOutline: "albums-outline" },
+    { name: "index", title: "Home", icon: "home" },
+    { name: "search", title: "Search", icon: "search" },
+    { name: "library", title: "Library", icon: "albums" },
+    { name: "settings", title: "Settings", icon: "settings" },
   ];
 
   return (
     <View style={{ flex: 1, backgroundColor: COLORS.background }}>
       <Tabs
         screenOptions={{
-          tabBarStyle: {
-            display: "none",
-          },
+          tabBarStyle: { display: "none" },
           headerShown: false,
         }}
       >
-        <Tabs.Screen
-          name="index"
-          options={{
-            title: "Home",
-            tabBarIcon: ({ color, focused }) => (
-              <TabBarIcon
-                name={focused ? "home" : "home-outline"}
-                color={color}
-              />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="search"
-          options={{
-            title: "Search",
-            tabBarIcon: ({ color, focused }) => (
-              <TabBarIcon
-                name={focused ? "search" : "search-outline"}
-                color={color}
-              />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="library"
-          options={{
-            title: "Library",
-            tabBarIcon: ({ color, focused }) => (
-              <TabBarIcon
-                name={focused ? "albums" : "albums-outline"}
-                color={color}
-              />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="category"
-          options={{
-            href: null,
-            headerShown: false,
-          }}
-        />
-        <Tabs.Screen 
-          name="settings" 
-          options={{ 
-            href: null 
-          }} 
-        />
+        {tabs.map((tab) => (
+          <Tabs.Screen
+            key={tab.name}
+            name={tab.name}
+            options={{
+              title: tab.title,
+              tabBarIcon: ({ color, focused }) => (
+                <TabBarIcon
+                  name={focused ? tab.icon : `${tab.icon}-outline`}
+                  color={color}
+                />
+              ),
+            }}
+          />
+        ))}
       </Tabs>
 
-      {/* Only show tab bar and floating player when NOT on player screen */}
       {!isPlayerScreen && (
         <>
-          {/* CUSTOM TAB BAR */}
-          <View 
+          <View
             style={[
               styles.customTabBar,
-              { 
-                height: TAB_HEIGHT + safeAreaBottom,
-                paddingBottom: safeAreaBottom,
-              }
+              { height: TAB_HEIGHT + safeAreaBottom, paddingBottom: safeAreaBottom },
             ]}
           >
             <LinearGradient
-              colors={[
-                "rgba(18,18,18,0.98)",
-                "rgba(18,18,18,0.95)",
-                COLORS.surfaceDark
-              ]}
+              colors={["rgba(18,18,18,0.98)", "rgba(18,18,18,0.95)", COLORS.surfaceDark]}
               style={StyleSheet.absoluteFill}
             />
-            
-            <View style={styles.tabBarGoldBorder} />
-            
             <View style={styles.tabButtonsContainer}>
               {tabs.map((tab) => (
                 <TouchableOpacity
@@ -157,17 +95,13 @@ function TabLayoutContent() {
                   onPress={() => handleTabPress(tab.name)}
                   activeOpacity={0.8}
                 >
-                  <Ionicons
-                    name={tab.icon}
-                    size={24}
-                    color={COLORS.goldShimmer}
-                  />
+                  <Ionicons name={tab.icon} size={24} color={COLORS.goldShimmer} />
                   <Text style={styles.tabLabel}>{tab.title}</Text>
                 </TouchableOpacity>
               ))}
             </View>
           </View>
-          
+
           <FloatingPlayer />
         </>
       )}
@@ -185,18 +119,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.goldPrimary + "40",
     zIndex: 10,
     overflow: "hidden",
-  },
-  tabBarGoldBorder: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 2,
-    backgroundColor: COLORS.goldPrimary + "60",
   },
   tabButtonsContainer: {
     flexDirection: "row",
