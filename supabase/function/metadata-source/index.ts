@@ -1,150 +1,115 @@
-// supabase/functions/metadata-source/index.ts
-
-import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import { SpotifyClient } from './spotify-client.ts';
-import { DeezerClient } from './deezer-client.ts';
-import { SoundCloudClient } from './soundcloud-client.ts';
-import { MetadataTransformer } from './transformers.ts';
-import { FunctionResponse } from './types.ts';
+import { serve } from 'https://deno.land/std@0.224.0/http/server.ts'
+import { searchYouTube } from './search.ts'
+import { getPlayerResponse, getBestAudioFormat } from './player.ts'
+import { decipherSignature } from './decipher.ts'
 
 const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Max-Age': '86400'
+}
 
-serve(async (req) => {
-    const startTime = Date.now();
-    
-    if (req.method === 'OPTIONS') {
-        return new Response('ok', { headers: corsHeaders });
-    }
+serve(async (req: Request): Promise<Response> => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { 
+      status: 204,
+      headers: corsHeaders 
+    })
+  }
 
+  try {
     if (req.method !== 'POST') {
-        return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-            status: 405,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+      throw new Error('Method not allowed')
     }
 
-    try {
-        const body = await req.json().catch(() => ({}));
-        const { query } = body;
-        
-        if (!query || typeof query !== 'string' || query.trim() === '') {
-            return new Response(JSON.stringify({ error: 'Valid query string is required' }), {
-                status: 400,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            });
-        }
-
-        const trimmedQuery = query.trim();
-        console.log(`\n🎵 SEARCHING: "${trimmedQuery}"`);
-        console.log('='.repeat(50));
-
-        // Initialize clients
-        const spotify = new SpotifyClient();
-        const deezer = new DeezerClient();
-        const soundcloud = new SoundCloudClient();
-
-        // Set timeout (8 seconds for slower APIs)
-        const timeoutMs = 8000;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-        try {
-            // Search all sources in parallel
-            const [spotifyResult, deezerResult, soundcloudResult] = await Promise.allSettled([
-                spotify.searchTrack(trimmedQuery),
-                deezer.searchTrack(trimmedQuery),
-                soundcloud.searchTrack(trimmedQuery),
-            ]);
-
-            clearTimeout(timeoutId);
-
-            // Log results
-            console.log('\n📊 Results:');
-            console.log(`   Spotify: ${spotifyResult.status === 'fulfilled' && spotifyResult.value ? '✅ Found' : '❌'}`);
-            console.log(`   Deezer: ${deezerResult.status === 'fulfilled' && deezerResult.value ? '✅ Found' : '❌'}`);
-            console.log(`   SoundCloud: ${soundcloudResult.status === 'fulfilled' && soundcloudResult.value ? '✅ Found' : '❌'}`);
-
-            // Priority order: Spotify > Deezer > SoundCloud
-            if (spotifyResult.status === 'fulfilled' && spotifyResult.value) {
-                const metadata = MetadataTransformer.fromSpotify(spotifyResult.value);
-                MetadataTransformer.logMetadata(metadata);
-                
-                return new Response(JSON.stringify({
-                    success: true,
-                    source: 'spotify',
-                    data: { track: metadata },
-                    responseTime: Date.now() - startTime,
-                }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                });
-            }
-
-            if (deezerResult.status === 'fulfilled' && deezerResult.value) {
-                const metadata = MetadataTransformer.fromDeezer(deezerResult.value);
-                MetadataTransformer.logMetadata(metadata);
-                
-                return new Response(JSON.stringify({
-                    success: true,
-                    source: 'deezer',
-                    data: { track: metadata },
-                    responseTime: Date.now() - startTime,
-                }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                });
-            }
-
-            if (soundcloudResult.status === 'fulfilled' && soundcloudResult.value) {
-                const metadata = MetadataTransformer.fromSoundCloud(soundcloudResult.value);
-                MetadataTransformer.logMetadata(metadata);
-                
-                return new Response(JSON.stringify({
-                    success: true,
-                    source: 'soundcloud',
-                    data: { track: metadata },
-                    responseTime: Date.now() - startTime,
-                }), {
-                    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                });
-            }
-
-            // Log failures
-            console.log('\n❌ All sources failed:');
-            if (spotifyResult.status === 'rejected') console.log(`   Spotify: ${spotifyResult.reason?.message}`);
-            if (deezerResult.status === 'rejected') console.log(`   Deezer: ${deezerResult.reason?.message}`);
-            if (soundcloudResult.status === 'rejected') console.log(`   SoundCloud: ${soundcloudResult.reason?.message}`);
-
-            return new Response(JSON.stringify({
-                success: false,
-                source: 'none',
-                error: 'No results found from any source',
-                responseTime: Date.now() - startTime,
-            }), {
-                status: 404,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            });
-
-        } finally {
-            clearTimeout(timeoutId);
-            spotify.abort();
-            deezer.abort();
-            soundcloud.abort();
-        }
-
-    } catch (error) {
-        console.error('❌ Error:', error.message);
-        
-        return new Response(JSON.stringify({
-            success: false,
-            source: 'none',
-            error: error.message,
-            responseTime: Date.now() - startTime,
-        }), {
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+    const body = await req.json().catch(() => null)
+    
+    if (!body) {
+      throw new Error('Invalid JSON in request body')
     }
-});
+
+    const { artist, title, isrc, videoId } = body
+
+    if (!videoId && !artist && !title) {
+      throw new Error('Missing required fields: provide either videoId or artist+title')
+    }
+
+    let targetVideoId = videoId
+
+    if (!targetVideoId) {
+      if (!artist || !title) {
+        throw new Error('Artist and title required for search')
+      }
+
+      console.log(`🔍 Searching YouTube for: ${artist} - ${title}`)
+      
+      const searchQuery = isrc ? `ISRC:${isrc}` : `${artist} ${title} audio`
+      targetVideoId = await searchYouTube(searchQuery)
+      
+      if (!targetVideoId) {
+        throw new Error('No video found on YouTube')
+      }
+      
+      console.log(`✅ Found video: ${targetVideoId}`)
+    }
+
+    // THIS IS WHERE WE USE THE PLAYER.TS FUNCTION
+    console.log(`📡 Getting stream for video: ${targetVideoId}`)
+    const playerResponse = await getPlayerResponse(targetVideoId)
+    
+    const audioFormat = getBestAudioFormat(playerResponse)
+    
+    if (!audioFormat) {
+      throw new Error('No audio format available')
+    }
+
+    // Get playable URL
+    let streamUrl: string
+    if (audioFormat.url) {
+      streamUrl = audioFormat.url
+    } else if (audioFormat.signatureCipher) {
+      streamUrl = await decipherSignature(audioFormat.signatureCipher)
+    } else {
+      throw new Error('No playable URL found')
+    }
+
+    const result = {
+      url: streamUrl,
+      videoId: targetVideoId,
+      source: 'youtube',
+      expires: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
+      quality: audioFormat.audioQuality?.toLowerCase() || 
+               (audioFormat.bitrate > 128000 ? 'high' : 'medium'),
+      success: true
+    }
+
+    return new Response(
+      JSON.stringify(result), {
+        status: 200,
+        headers: { 
+          ...corsHeaders, 
+          'Content-Type': 'application/json',
+          'Cache-Control': 'public, max-age=21600'
+        }
+      }
+    )
+
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    console.error('Error:', errorMessage)
+    
+    return new Response(
+      JSON.stringify({ 
+        error: errorMessage,
+        success: false
+      }), {
+        status: 500,
+        headers: { 
+          ...corsHeaders, 
+          'Content-Type': 'application/json' 
+        }
+      }
+    )
+  }
+})

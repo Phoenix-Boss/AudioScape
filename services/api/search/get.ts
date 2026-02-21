@@ -1,8 +1,7 @@
 // src/services/api/search/get.ts
-import { Source, TrackData } from '../../types/track';
+import { cache } from '../../../libs/cache';
+import { Source, TrackData, Artist } from '../../types';
 import getRequest from '../request/get';
-import { CacheFortress } from '../../cache/fortress';
-import getTrack from '../track/get';
 
 export interface SearchParams {
   query: string;
@@ -31,7 +30,8 @@ export default async function searchGet({
   const startTime = Date.now();
   const cacheKey = `search:${source}:${type}:${query}:${page}`;
 
-  const cached = await CacheFortress.get<SearchResult>(cacheKey);
+  // Try cache first using your actual cache
+  const cached = await cache.device.get<SearchResult>(cacheKey);
   if (cached) {
     console.log(`📦 Search cache hit: "${query}"`);
     return cached;
@@ -91,6 +91,15 @@ export default async function searchGet({
             url = 'https://bandcamp.com/api/mobile/22/search';
             params = { q: query };
             break;
+          default:
+            console.log(`⚠️ Unsupported source: ${src}`);
+            return;
+        }
+
+        // Skip if URL is empty
+        if (!url) {
+          console.log(`⚠️ No URL configured for ${src}`);
+          return;
         }
 
         const response = await getRequest({
@@ -99,80 +108,288 @@ export default async function searchGet({
           isWithSelfToken: src !== 'deezer' && src !== 'bandcamp',
         });
 
-        const tracks = extractTracksFromResponse(src, response, query);
-        result.tracks.push(...tracks);
+        // Validate response
+        if (!response || !response.data) {
+          console.log(`⚠️ Empty response from ${src}`);
+          return;
+        }
+
+        const tracks = extractTracksFromResponse(src, response);
         
-      } catch (error) {
-        console.log(`❌ ${src} search failed:`, error);
+        if (tracks.length > 0) {
+          console.log(`✅ ${src} returned ${tracks.length} tracks`);
+          result.tracks.push(...tracks);
+        } else {
+          console.log(`ℹ️ No tracks from ${src}`);
+        }
+        
+      } catch (error: any) {
+        console.log(`❌ ${src} search failed:`, error?.message || 'Unknown error');
       }
     })
   );
 
-  result.tracks = result.tracks.slice(0, limit);
-  
-  await CacheFortress.set(cacheKey, result, 60 * 60 * 1000); // 1 hour cache
-  console.log(`🔍 Search completed in ${Date.now() - startTime}ms: ${result.tracks.length} tracks`);
+  // Sort tracks by source priority
+  result.tracks = result.tracks
+    .sort((a, b) => {
+      const priority: Record<Source, number> = {
+        spotify: 1,
+        deezer: 2,
+        youtubeMusic: 3,
+        youtube: 4,
+        soundcloud: 5,
+        tidal: 6,
+        qobuz: 7,
+        amazon: 8,
+        napster: 9,
+        pandora: 10,
+        vk: 11,
+        yandex: 12,
+        bandcamp: 13,
+        lastfm: 14,
+        discogs: 15,
+        genius: 16,
+        musixmatch: 17
+      };
+      return (priority[a.source as Source] || 99) - (priority[b.source as Source] || 99);
+    })
+    .slice(0, limit);
+
+  // Save to cache
+  if (result.tracks.length > 0) {
+    await cache.device.set(cacheKey, result, 60 * 60 * 1000); // 1 hour TTL
+    
+    // Also try to save to Supabase cache (non-blocking)
+    try {
+      await cache.supabase.set(cacheKey, result);
+    } catch {
+      // Silently fail - Supabase cache is optional
+    }
+  }
+
+  console.log(`🔍 Search completed in ${Date.now() - startTime}ms: ${result.tracks.length} tracks from ${[...new Set(result.tracks.map(t => t.source))].join(', ')}`);
 
   return result;
 }
 
-function extractTracksFromResponse(source: Source, response: any, query: string): TrackData[] {
-  const data = response.data;
+function extractTracksFromResponse(source: Source, response: any): TrackData[] {
   const tracks: TrackData[] = [];
+  
+  // Safely access data with optional chaining
+  const data = response?.data;
+  if (!data) return tracks;
 
-  switch (source) {
-    case 'spotify':
-      if (data.tracks?.items) {
-        data.tracks.items.forEach((item: any) => {
-          tracks.push({
-            id: item.id,
-            title: item.name,
-            artist: item.artists[0]?.name || 'Unknown',
-            artistId: item.artists[0]?.id,
-            album: item.album.name,
-            albumId: item.album.id,
-            duration: Math.floor(item.duration_ms / 1000),
-            image: item.album.images[0]?.url,
-            source,
-          });
-        });
-      }
-      break;
+  try {
+    switch (source) {
+      case 'spotify': {
+        const items = data?.tracks?.items;
+        if (Array.isArray(items)) {
+          items.forEach((item: any) => {
+            if (!item) return;
+            
+            const artist: Artist = {
+              id: item.artists?.[0]?.id,
+              name: item.artists?.[0]?.name || 'Unknown Artist',
+              image: item.artists?.[0]?.images?.[0]?.url
+            };
 
-    case 'deezer':
-      if (data.data) {
-        data.data.forEach((item: any) => {
-          tracks.push({
-            id: item.id,
-            title: item.title,
-            artist: item.artist.name,
-            artistId: item.artist.id,
-            album: item.album.title,
-            albumId: item.album.id,
-            duration: item.duration,
-            image: item.album.cover_medium,
-            source,
+            tracks.push({
+              id: item.id,
+              title: item.name || 'Unknown Title',
+              artist,
+              album: item.album?.name,
+              image: item.album?.images?.[0]?.url,
+              duration: item.duration_ms ? Math.floor(item.duration_ms / 1000) : undefined,
+              source,
+            });
           });
-        });
+        }
+        break;
       }
-      break;
 
-    case 'soundcloud':
-      if (data.collection) {
-        data.collection.forEach((item: any) => {
-          tracks.push({
-            id: item.id,
-            title: item.title,
-            artist: item.user.username,
-            artistId: item.user.id,
-            album: 'SoundCloud Track',
-            duration: Math.floor(item.duration / 1000),
-            image: item.artwork_url?.replace('large', 't500x500'),
-            source,
+      case 'deezer': {
+        const items = data?.data;
+        if (Array.isArray(items)) {
+          items.forEach((item: any) => {
+            if (!item) return;
+            
+            const artist: Artist = {
+              id: item.artist?.id,
+              name: item.artist?.name || 'Unknown Artist',
+              image: item.artist?.picture_medium
+            };
+
+            tracks.push({
+              id: item.id,
+              title: item.title || 'Unknown Title',
+              artist,
+              album: item.album?.title,
+              image: item.album?.cover_medium,
+              duration: item.duration,
+              source,
+            });
           });
-        });
+        }
+        break;
       }
-      break;
+
+      case 'soundcloud': {
+        const items = data?.collection;
+        if (Array.isArray(items)) {
+          items.forEach((item: any) => {
+            if (!item) return;
+            
+            const artist: Artist = {
+              id: item.user?.id,
+              name: item.user?.username || 'Unknown Artist',
+              image: item.user?.avatar_url
+            };
+
+            tracks.push({
+              id: item.id,
+              title: item.title || 'Unknown Title',
+              artist,
+              album: 'SoundCloud Track',
+              image: item.artwork_url?.replace('large', 't500x500'),
+              duration: item.duration ? Math.floor(item.duration / 1000) : undefined,
+              source,
+            });
+          });
+        }
+        break;
+      }
+
+      case 'youtubeMusic': {
+        try {
+          const sections = data?.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents;
+          if (Array.isArray(sections)) {
+            sections.forEach((section: any) => {
+              const contents = section?.musicShelfRenderer?.contents;
+              if (Array.isArray(contents)) {
+                contents.forEach((item: any) => {
+                  const renderer = item?.musicResponsiveListItemRenderer;
+                  if (!renderer) return;
+                  
+                  const artist: Artist = {
+                    name: renderer?.flexColumns?.[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text || 'Unknown'
+                  };
+
+                  tracks.push({
+                    id: renderer?.playlistItemData?.videoId || renderer?.videoId,
+                    title: renderer?.flexColumns?.[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text || 'Unknown Title',
+                    artist,
+                    album: 'YouTube Music',
+                    image: renderer?.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.[0]?.url,
+                    duration: parseInt(renderer?.flexColumns?.[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[2]?.text) || 0,
+                    source,
+                  });
+                });
+              }
+            });
+          }
+        } catch (e) {
+          console.log('YouTube Music parsing error:', e);
+        }
+        break;
+      }
+
+      case 'tidal': {
+        const items = data?.data;
+        if (Array.isArray(items)) {
+          items.forEach((item: any) => {
+            if (!item) return;
+            
+            const artist: Artist = {
+              id: item.artist?.id,
+              name: item.artist?.name || 'Unknown',
+            };
+
+            tracks.push({
+              id: item.id,
+              title: item.title || 'Unknown Title',
+              artist,
+              album: item.album?.title,
+              duration: item.duration,
+              image: item.album?.cover,
+              source,
+            });
+          });
+        }
+        break;
+      }
+
+      case 'vk': {
+        const items = data?.response?.items;
+        if (Array.isArray(items)) {
+          items.forEach((item: any) => {
+            if (!item) return;
+            
+            const artist: Artist = {
+              name: item.artist || 'Unknown',
+            };
+
+            tracks.push({
+              id: item.id,
+              title: item.title || 'Unknown Title',
+              artist,
+              duration: item.duration,
+              source,
+            });
+          });
+        }
+        break;
+      }
+
+      case 'yandex': {
+        const items = data?.result?.tracks;
+        if (Array.isArray(items)) {
+          items.forEach((item: any) => {
+            if (!item) return;
+            
+            const artist: Artist = {
+              id: item.artists?.[0]?.id,
+              name: item.artists?.[0]?.name || 'Unknown',
+            };
+
+            tracks.push({
+              id: item.id,
+              title: item.title || 'Unknown Title',
+              artist,
+              album: item.albums?.[0]?.title,
+              duration: item.durationMs ? Math.floor(item.durationMs / 1000) : item.duration,
+              source,
+            });
+          });
+        }
+        break;
+      }
+
+      case 'bandcamp': {
+        const items = data?.results;
+        if (Array.isArray(items)) {
+          items.forEach((item: any) => {
+            if (!item || item.type !== 'track') return;
+            
+            const artist: Artist = {
+              name: item.band?.name || 'Unknown',
+            };
+
+            tracks.push({
+              id: item.id,
+              title: item.title || 'Unknown Title',
+              artist,
+              album: item.album?.title,
+              duration: item.duration,
+              image: item.art?.url,
+              source,
+            });
+          });
+        }
+        break;
+      }
+    }
+  } catch (error) {
+    console.log(`Error extracting tracks from ${source}:`, error);
   }
 
   return tracks;
